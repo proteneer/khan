@@ -1,9 +1,12 @@
 import unittest
 import math
+import time
 import tensorflow as tf
+from tensorflow.python.client import timeline
 import numpy as np
 
 from khan.model import symmetrizer
+from tensorflow.python import debug as tf_debug
 
 class TestSymmetrizer(unittest.TestCase):
 
@@ -24,7 +27,7 @@ class TestSymmetrizer(unittest.TestCase):
             [1, 0.3, 1.7, 3.2], # C
             [2, 0.6, 1.2, 1.1], # N
             [0, 14.0, 23.0, 15.0], # H
-        ])
+        ], dtype=np.float32)
 
         coords_matrix = atom_matrix[:, 1:]
 
@@ -57,13 +60,13 @@ class TestSymmetrizer(unittest.TestCase):
         fC = 0.5 * math.cos(math.pi * r_01/R_Rc) + 0.5
         expected_r_0 = math.exp(-R_eta*math.pow(r_01-R_Rs[0], 2)) * fC
 
-        np.testing.assert_almost_equal(expected_r_0, 0.8607852536605668)
-        np.testing.assert_almost_equal(result[0][0], expected_r_0)
+        np.testing.assert_almost_equal(expected_r_0, 0.8607852536605668, decimal=6)
+        np.testing.assert_almost_equal(result[0][0], expected_r_0, decimal=6)
 
         fC = 0.5 * math.cos(math.pi * r_01/R_Rc) + 0.5
         expected_r_1 = math.exp(-R_eta*math.pow(r_01-R_Rs[1], 2)) * fC
 
-        np.testing.assert_almost_equal(result[0][1], expected_r_1)
+        np.testing.assert_almost_equal(result[0][1], expected_r_1, decimal=6)
 
         # test atom 1
         r_10 = np.linalg.norm(coords_matrix[1] - coords_matrix[0])
@@ -75,7 +78,7 @@ class TestSymmetrizer(unittest.TestCase):
         fC1 = 0.5 * math.cos(math.pi * r_11/R_Rc) + 0.5
         expected_r_1 = math.exp(-R_eta*math.pow(r_11-R_Rs[0], 2)) * fC1
 
-        np.testing.assert_almost_equal(result[1][0], expected_r_0 + expected_r_1)
+        np.testing.assert_almost_equal(result[1][0], expected_r_0 + expected_r_1, decimal=6)
 
         # N block:
         #   1 4
@@ -91,7 +94,7 @@ class TestSymmetrizer(unittest.TestCase):
 
         # 012345 -> 5 corresponds to Rs1
         # HHCCNN
-        np.testing.assert_almost_equal(result[3][5], expected_r_31 + expected_r_34)
+        np.testing.assert_almost_equal(result[3][5], expected_r_31 + expected_r_34, decimal=6)
 
     def test_angular_symmetry(self):
 
@@ -104,7 +107,7 @@ class TestSymmetrizer(unittest.TestCase):
             [0, 14.0, 23.0, 15.0], # H
             [0, 2.0, 0.5, 0.3], # H
             [0, 2.3, 0.2, 0.4], # H
-        ])
+        ], dtype=np.float32)
 
         coords_matrix = atom_matrix[:, 1:]
 
@@ -153,8 +156,106 @@ class TestSymmetrizer(unittest.TestCase):
 
                 expected[r_idx][t_idx] = cum_sum * np.power(2.0, 1 - A_zeta)
 
-        np.testing.assert_almost_equal(expected[0][0], obtained[2][0])
-        np.testing.assert_almost_equal(expected[0][1], obtained[2][1])
-        np.testing.assert_almost_equal(expected[1][0], obtained[2][2])
-        np.testing.assert_almost_equal(expected[1][1], obtained[2][3])
+        np.testing.assert_almost_equal(expected[0][0], obtained[2][0], decimal=6)
+        np.testing.assert_almost_equal(expected[0][1], obtained[2][1], decimal=6)
+        np.testing.assert_almost_equal(expected[1][0], obtained[2][2], decimal=6)
+        np.testing.assert_almost_equal(expected[1][1], obtained[2][3], decimal=6)
 
+    def test_featurize(self):
+
+        atom_matrix = np.array([
+            [0, 1.0, 2.0, 3.0], # H
+            [2, 2.0, 1.0, 4.0], # N
+            [0, 0.5, 1.2, 2.3], # H
+            [1, 0.3, 1.7, 3.2], # C
+            [2, 0.6, 1.2, 1.1], # N
+            [0, 14.0, 23.0, 15.0], # H
+            [0, 2.0, 0.5, 0.3], # H
+            [0, 2.3, 0.2, 0.4], # H
+
+            [0, 2.3, 0.2, 0.4], # H
+            [1, 0.3, 1.7, 3.2], # C
+            [2, 0.6, 1.2, 1.1]], dtype=np.float32)
+
+        sym = symmetrizer.Symmetrizer()
+        # result = sym.radial_symmetry(tf.constant(atom_matrix[]))
+        result_1 = sym.featurize_one(tf.constant(atom_matrix[:8, :], dtype=tf.float32))
+        result_2 = sym.featurize_one(tf.constant(atom_matrix[8:, :], dtype=tf.float32))
+        first = self.sess.run(result_1)
+        second = self.sess.run(result_2)
+
+        mol_idxs = np.array([0,0,0,0,0,0,0,0,1,1,1])
+        results_all = sym.featurize_batch(atom_matrix, mol_idxs, 2)
+        combined = self.sess.run(results_all)
+
+        np.testing.assert_array_equal(np.concatenate([first, second], axis=0), combined)
+
+    def test_benchmark(self):
+
+        st = time.time()
+        num_mols_per_batch = 16
+        sym = symmetrizer.Symmetrizer()
+
+        mc = tf.placeholder(tf.float32)
+        mi = tf.placeholder(tf.int32)
+        nm = tf.placeholder(tf.int32)
+
+        # results_all = sym.featurize_batch(mol_coords, mol_idxs, num_mols_per_batch)
+        results_all = sym.featurize_batch(mc, mi, num_mols_per_batch)
+
+        max_batches = 100
+
+        for i in range(max_batches):
+            mol_coords = []
+            mol_idxs = []
+            for mol_idx in range(num_mols_per_batch):
+                num_atoms = np.random.randint(12,64)
+                for i in range(num_atoms):
+                    atom_type = np.random.randint(0,4)
+                    x = np.random.rand()
+                    y = np.random.rand()
+                    z = np.random.rand()
+                    mol_coords.append((atom_type, x, y, z))
+                    mol_idxs.append(mol_idx)
+            mol_coords = np.array(mol_coords, dtype=np.float32)
+            mol_idxs = np.array(mol_idxs, dtype=np.int32)
+
+            combined = self.sess.run(results_all, feed_dict={
+                mc: mol_coords,
+                mi: mol_idxs,
+                nm: num_mols_per_batch
+            })
+
+        print("Time Per Mol:", (time.time() - st)/(max_batches*num_mols_per_batch))
+
+        # sess2 = tf.Session()
+        # # sess2 = tf_debug.LocalCLIDebugWrapperSession(sess2)
+        # # combined = sess2.run(results_all, feed_dict={
+        # #     mc: mol_coords,
+        # #     mi: mol_idxs,
+        # #     nm: num_mols
+        # # })
+        
+        # options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        # run_metadata = tf.RunMetadata()
+
+        # sess2.run(results_all,
+        #         feed_dict={
+        #                     mc: mol_coords,
+        #                     mi: mol_idxs,
+        #                     nm: num_mols
+        #                 },
+        #         options=options,
+        #         run_metadata=run_metadata)
+        # sess2.close()
+
+        # fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+        # chrome_trace = fetched_timeline.generate_chrome_trace_format()
+        # with open('/home/yutong/ttttt.json', 'w') as f:
+        #     f.write(chrome_trace)
+
+        # print("Time Per Mol:", (time.time() - st)/num_mols)
+
+        # print(first, second, combined)
+if __name__ == "__main__":
+    unittest.main()
