@@ -210,7 +210,6 @@ class Symmetrizer():
                 keep_flags = tf.expand_dims(keep_flags, -1)
                 keep_flags = tf.expand_dims(keep_flags, -1)
 
-
                 summand = tf.multiply(summand, keep_flags)
                 result = tf.multiply(tf.pow(np.float64(2.0), 1-self.A_zeta), tf.reduce_sum(summand, [1,2])) 
                 result = tf.reshape(result, (num_atoms, -1))

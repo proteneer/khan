@@ -128,7 +128,7 @@ class TestSymmetrizer(unittest.TestCase):
         # for atom 2, which is an H
         #                                   x  x
         # the HH feature should include (2[05,50,06,60,07,70]), but 5-x distance is outside of the shell. So the only contribution should be
-        # from the 205.
+        # from the 205. The interactions 2[56,65,57,75] should be excluded since it's outside of the distance cutoff.
         pair_lists = [(0, 6), (6, 0), (0, 7), (7, 0), (6, 7), (7, 6)]
 
         expected = np.zeros((2, 2))
