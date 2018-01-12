@@ -128,7 +128,9 @@ class Symmetrizer():
             and rank 1 consists of (t, x, y, z) such that t is a compacted atomic number.
 
         Returns
-        -------        
+        -------
+        tf.Tensor
+            Featurized representation of shape (num_atoms, len(sym.A_Rs)*len(sym.A_thetas)*sym.max_atom_types*(sym.max_atom_types+1)/2)
 
         """
         num_atoms = tf.shape(atom_matrix)[0]
