@@ -123,9 +123,6 @@ class TestSymmetrizer(unittest.TestCase):
 
         assert obtained.shape == (atom_matrix.shape[0], len(sym.A_Rs)*len(sym.A_thetas)*sym.max_atom_types*(sym.max_atom_types+1)/2)
 
-        # print(result.shape)
-        # print(result)
-
         # compute 0-HH features
 
         # for atom 2, which is an H
