@@ -1,6 +1,9 @@
 import unittest
 import math
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import tensorflow as tf
 from tensorflow.python.client import timeline
 import numpy as np
@@ -184,49 +187,83 @@ class TestSymmetrizer(unittest.TestCase):
         first = self.sess.run(result_1)
         second = self.sess.run(result_2)
 
-        mol_idxs = np.array([0,0,0,0,0,0,0,0,1,1,1])
-        results_all = sym.featurize_batch(atom_matrix, mol_idxs, 2)
-        combined = self.sess.run(results_all)
+        mol_offsets = np.array([(0, 8), (8, 11)], dtype=np.int32)
 
-        np.testing.assert_array_equal(np.concatenate([first, second], axis=0), combined)
+        mc = tf.placeholder(tf.float32)
+        mo = tf.placeholder(tf.int32)
+
+        results_all = sym.featurize_batch(mc, mo)
+        combined = self.sess.run(results_all, feed_dict={
+            mc: atom_matrix,
+            mo: mol_offsets,
+        })
+
+        expected = np.concatenate([first, second], axis=0)
+
+        np.testing.assert_array_almost_equal(expected, combined)
 
     def test_benchmark(self):
 
-        st = time.time()
-        num_mols_per_batch = 16
+        num_mols_per_batch = 1
         sym = symmetrizer.Symmetrizer()
 
         mc = tf.placeholder(tf.float32)
         mi = tf.placeholder(tf.int32)
-        nm = tf.placeholder(tf.int32)
 
-        # results_all = sym.featurize_batch(mol_coords, mol_idxs, num_mols_per_batch)
-        results_all = sym.featurize_batch(mc, mi, num_mols_per_batch)
+        results_all = sym.featurize_batch(mc, mi)
 
-        max_batches = 100
+        # batches_per_thread = 32
+        # n_threads = 4
 
-        for i in range(max_batches):
-            mol_coords = []
-            mol_idxs = []
-            for mol_idx in range(num_mols_per_batch):
-                num_atoms = np.random.randint(12,64)
-                for i in range(num_atoms):
-                    atom_type = np.random.randint(0,4)
-                    x = np.random.rand()
-                    y = np.random.rand()
-                    z = np.random.rand()
-                    mol_coords.append((atom_type, x, y, z))
-                    mol_idxs.append(mol_idx)
-            mol_coords = np.array(mol_coords, dtype=np.float32)
-            mol_idxs = np.array(mol_idxs, dtype=np.int32)
+        # def closure():
+        #     print("starting...")
+        #     tot_time = 0
+        #     for i in range(batches_per_thread):
+        #         mol_coords = []
+        #         mol_offsets = []
+        #         last_idx = len(mol_coords)
 
-            combined = self.sess.run(results_all, feed_dict={
-                mc: mol_coords,
-                mi: mol_idxs,
-                nm: num_mols_per_batch
-            })
+        #         for mol_idx in range(num_mols_per_batch):
+        #             num_atoms = np.random.randint(12,64)
+        #             for i in range(num_atoms):
+        #                 atom_type = np.random.randint(0,4)
+        #                 x = np.random.rand()
+        #                 y = np.random.rand()
+        #                 z = np.random.rand()
+        #                 mol_coords.append((atom_type, x, y, z))
 
-        print("Time Per Mol:", (time.time() - st)/(max_batches*num_mols_per_batch))
+        #             mol_offsets.append((last_idx, len(mol_coords)))
+        #             last_idx = len(mol_coords)
+
+        #         mol_coords = np.array(mol_coords, dtype=np.float32)
+        #         mol_offsets = np.array(mol_offsets, dtype=np.int32)
+
+        #         print("running on tid", threading.current_thread())
+        #         st = time.time()
+        #         combined = self.sess.run(results_all, feed_dict={
+        #             mc: mol_coords,
+        #             mi: mol_offsets
+        #         })
+
+        #         if i > 0:
+        #             tot_time += time.time() - st
+
+        #     return tot_time
+
+        # executor = ThreadPoolExecutor(4)
+        # futures = []
+        # delta = 0
+
+        # for p in range(n_threads):
+        #     futures.append(executor.submit(closure))
+        # for f in futures:
+        #     delta += f.result()
+
+        # print("Time Per Mol:", delta/((batches_per_thread-1)*n_threads*num_mols_per_batch))
+
+
+
+
 
         # sess2 = tf.Session()
         # # sess2 = tf_debug.LocalCLIDebugWrapperSession(sess2)
@@ -235,24 +272,44 @@ class TestSymmetrizer(unittest.TestCase):
         # #     mi: mol_idxs,
         # #     nm: num_mols
         # # })
-        
-        # options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-        # run_metadata = tf.RunMetadata()
 
-        # sess2.run(results_all,
-        #         feed_dict={
-        #                     mc: mol_coords,
-        #                     mi: mol_idxs,
-        #                     nm: num_mols
-        #                 },
-        #         options=options,
-        #         run_metadata=run_metadata)
-        # sess2.close()
+        # num_mols_per_batch = 256
 
-        # fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-        # chrome_trace = fetched_timeline.generate_chrome_trace_format()
-        # with open('/home/yutong/ttttt.json', 'w') as f:
-        #     f.write(chrome_trace)
+        mol_coords = []
+        mol_offsets = []
+        last_idx = len(mol_coords)
+
+        for mol_idx in range(num_mols_per_batch):
+            num_atoms = np.random.randint(12,64)
+            for i in range(num_atoms):
+                atom_type = np.random.randint(0,4)
+                x = np.random.rand()
+                y = np.random.rand()
+                z = np.random.rand()
+                mol_coords.append((atom_type, x, y, z))
+
+            mol_offsets.append((last_idx, len(mol_coords)))
+            last_idx = len(mol_coords)
+
+        mol_coords = np.array(mol_coords, dtype=np.float32)
+        mol_offsets = np.array(mol_offsets, dtype=np.int32)
+
+        options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+
+        self.sess.run(results_all,
+                feed_dict={
+                            mc: mol_coords,
+                            mi: mol_offsets,
+                        },
+                options=options,
+                run_metadata=run_metadata)
+        self.sess.close()
+
+        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+        with open('/home/yutong/while_loop.json', 'w') as f:
+            f.write(chrome_trace)
 
         # print("Time Per Mol:", (time.time() - st)/num_mols)
 

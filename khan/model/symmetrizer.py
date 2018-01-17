@@ -88,7 +88,7 @@ class Symmetrizer():
         self.A_thetas = np.array(A_thetas, dtype=np.float32)
         self.A_zeta = np.float32(A_zeta)
 
-        # self.gdb_sess = tf.Session()
+        self.gdb_sess = tf.Session()
 
     def featurize_one(self, atom_matrix):
         """
@@ -109,7 +109,7 @@ class Symmetrizer():
         """
         return tf.concat([self.radial_symmetry(atom_matrix), self.angular_symmetry(atom_matrix)], axis=1)
     
-    def featurize_batch(self, batched_atom_matrix, mol_idxs, batch_size):
+    def featurize_batch(self, batched_atom_matrix, offsets):
         """
         Featurize a batch of atom matrices.
 
@@ -117,12 +117,10 @@ class Symmetrizer():
         ----------
         batched_atom_matrix: tf.Tensor
             Atom matrices of shape (None, 4), representing compacted molecules.
-
-        mol_idxs: tf.Tensor
-            Indices of each atom corresponding to the molecule it belongs in of shape (None, 1).
-
-        batch_size: int32
-            Number of molecules in the batch.
+    
+        offsets: tf.Tensor
+            Tensor of shape (None, 2), where rank 1 indicates the start and end such that
+            batch_atom_matrix[start:end, :] is a molecule.
 
         Returns
         -------
@@ -130,12 +128,34 @@ class Symmetrizer():
             Returns a completely featurized representation of the input molecules.
 
         """
-        mol_results = []
-        mols = tf.dynamic_partition(batched_atom_matrix, mol_idxs, batch_size)
-        for mol in mols:
-            mol_results.append(self.featurize_one(mol))
+        num_mols = tf.shape(offsets)[0]
 
-        return tf.concat(mol_results, axis=0)
+        ta_result = tf.TensorArray(
+            dtype=tf.float32,
+            size=tf.shape(batched_atom_matrix)[0],
+            name="ta_results",
+            element_shape=(self.feature_size()),
+        )
+
+        def compute(idx, accum):
+            start_idx = offsets[idx][0]
+            end_idx = offsets[idx][1]
+            mol = batched_atom_matrix[start_idx:end_idx, :]
+            accum = accum.scatter(tf.range(start=start_idx, limit=end_idx), self.featurize_one(mol))
+            return (idx+1, accum)
+
+        _, ta_results = tf.while_loop(
+            lambda i, _: i < num_mols, # condition
+            compute, # body
+            (0, ta_result)) # initial_state
+
+        return ta_results.stack()
+
+    def radial_feature_size(self):
+        return np.int32(self.max_atom_types * len(self.R_Rs))
+
+    def angular_feature_size(self):
+        return np.int32(len(self.A_Rs)*len(self.A_thetas)*self.max_atom_types*(self.max_atom_types+1)/2)
 
     def feature_size(self):
         """
@@ -145,10 +165,10 @@ class Symmetrizer():
         Returns
         -------
         int32
-            Length of the resulting features.
+            Length of the resulting features
 
         """
-        return self.max_atom_types * len(self.Rs) + len(self.A_Rs)*len(self.A_thetas)*self.max_atom_types*(self.max_atom_types+1)/2
+        return self.radial_feature_size() + self.angular_feature_size()
 
     def radial_symmetry(self, atom_matrix):
         """
@@ -203,7 +223,7 @@ class Symmetrizer():
             radial_features.append(tf.reduce_sum(summand * R_ij_flags, axis=1))
 
         radial_features = tf.concat(radial_features, axis=1)
-        radial_features = tf.reshape(radial_features, (num_atoms, -1)) # ravel
+        radial_features = tf.reshape(radial_features, (num_atoms, self.radial_feature_size())) # ravel
 
         return radial_features
 
@@ -300,11 +320,11 @@ class Symmetrizer():
 
                 summand = tf.multiply(summand, keep_flags)
                 result = tf.multiply(tf.pow(np.float32(2.0), 1-self.A_zeta), tf.reduce_sum(summand, [1,2])) 
-                result = tf.reshape(result, (num_atoms, -1))
+                result = tf.reshape(result, (num_atoms, len(self.A_thetas)*len(self.A_Rs)))
 
                 angular_features.append(result)
 
         angular_features = tf.concat(angular_features, axis=1)
-        angular_features = tf.reshape(angular_features, (num_atoms, -1)) # ravel
+        angular_features = tf.reshape(angular_features, (num_atoms, self.angular_feature_size())) # ravel
 
         return angular_features
