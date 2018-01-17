@@ -190,7 +190,7 @@ class Symmetrizer():
         num_atoms = tf.shape(atom_matrix)[0]
         atom_types = tf.cast(atom_matrix[:, 0], dtype=tf.int32)
         atom_coords = atom_matrix[:, 1:]
-        type_groups = tf.dynamic_partition(atom_coords, atom_types, self.max_atom_types)
+        type_groups = tf.dynamic_partition(atom_coords, atom_types, self.max_atom_types, name="dp_radial")
         atom_coords = tf.expand_dims(atom_coords, axis=1) #  we reshape atom_coords to (num_atoms, 1, 3)
         # loop through each of the atom types, eg. find all the atoms of type H, C, N, O, etc.
         radial_features = []
@@ -248,7 +248,7 @@ class Symmetrizer():
         atom_idxs = tf.range(tf.shape(atom_matrix)[0])
         atom_types = tf.cast(atom_matrix[:, 0], dtype=tf.int32)
         atom_coords = atom_matrix[:, 1:] # atom_coords shape: (num_atoms, 3)
-        type_groups_idxs = tf.dynamic_partition(atom_idxs, atom_types, self.max_atom_types)
+        type_groups_idxs = tf.dynamic_partition(atom_idxs, atom_types, self.max_atom_types, name="dp_angular")
         lookup = np.array([[[0, 3]],[[2,3]],[[5,3]]])
 
         angular_features = []
@@ -258,9 +258,9 @@ class Symmetrizer():
             for type_b in range(type_a, self.max_atom_types):
                 k_idxs = type_groups_idxs[type_b]
 
-                tile_a = tf.tile(tf.expand_dims(j_idxs, 1), [1, tf.shape(k_idxs)[0]])  
+                tile_a = tf.tile(tf.expand_dims(j_idxs, 1), [1, tf.shape(k_idxs)[0]], name="tile_outer1")
                 tile_a = tf.expand_dims(tile_a, 2) 
-                tile_b = tf.tile(tf.expand_dims(k_idxs, 0), [tf.shape(j_idxs)[0], 1]) 
+                tile_b = tf.tile(tf.expand_dims(k_idxs, 0), [tf.shape(j_idxs)[0], 1], name="tile_outer2")
                 tile_b = tf.expand_dims(tile_b, 2) 
                 cartesian_product = tf.concat([tile_a, tile_b], axis=2) # int64s?
                 
@@ -308,7 +308,7 @@ class Symmetrizer():
                 # (num_atoms, len(type_a), len(type_b), 3) where 3 is the distance of ij, ik, and jk respectively
                 # R_ij shape: (num_atoms, len(type_a), len(type_b))
                 # R_ik shape: (num_atoms, len(type_a), len(type_b))
-                R_jk = tf.tile(tf.expand_dims(R_jk, axis=0), [num_atoms, 1, 1])
+                R_jk = tf.tile(tf.expand_dims(R_jk, axis=0), [num_atoms, 1, 1], name="tile_inner")
                 R_ijk = tf.stack([R_ij, R_ik, R_jk], axis=-1)
 
                 # R_jk shape: (len(type_a), len(type_b))

@@ -204,7 +204,7 @@ class TestSymmetrizer(unittest.TestCase):
 
     def test_benchmark(self):
 
-        num_mols_per_batch = 1
+        num_mols_per_batch = 6
         sym = symmetrizer.Symmetrizer()
 
         mc = tf.placeholder(tf.float32)
@@ -212,87 +212,86 @@ class TestSymmetrizer(unittest.TestCase):
 
         results_all = sym.featurize_batch(mc, mi)
 
-        # batches_per_thread = 32
-        # n_threads = 4
+        batches_per_thread = 32
+        n_threads = 2
 
-        # def closure():
-        #     print("starting...")
-        #     tot_time = 0
-        #     for i in range(batches_per_thread):
-        #         mol_coords = []
-        #         mol_offsets = []
-        #         last_idx = len(mol_coords)
+        def closure():
+            tot_time = 0
+            for i in range(batches_per_thread):
+                mol_coords = []
+                mol_offsets = []
+                last_idx = len(mol_coords)
 
-        #         for mol_idx in range(num_mols_per_batch):
-        #             num_atoms = np.random.randint(12,64)
-        #             for i in range(num_atoms):
-        #                 atom_type = np.random.randint(0,4)
-        #                 x = np.random.rand()
-        #                 y = np.random.rand()
-        #                 z = np.random.rand()
-        #                 mol_coords.append((atom_type, x, y, z))
+                for mol_idx in range(num_mols_per_batch):
+                    num_atoms = np.random.randint(12,64)
+                    for i in range(num_atoms):
+                        atom_type = np.random.randint(0,4)
+                        x = np.random.rand()
+                        y = np.random.rand()
+                        z = np.random.rand()
+                        mol_coords.append((atom_type, x, y, z))
 
-        #             mol_offsets.append((last_idx, len(mol_coords)))
-        #             last_idx = len(mol_coords)
+                    mol_offsets.append((last_idx, len(mol_coords)))
+                    last_idx = len(mol_coords)
 
-        #         mol_coords = np.array(mol_coords, dtype=np.float32)
-        #         mol_offsets = np.array(mol_offsets, dtype=np.int32)
+                mol_coords = np.array(mol_coords, dtype=np.float32)
+                mol_offsets = np.array(mol_offsets, dtype=np.int32)
 
-        #         print("running on tid", threading.current_thread())
-        #         st = time.time()
-        #         combined = self.sess.run(results_all, feed_dict={
-        #             mc: mol_coords,
-        #             mi: mol_offsets
-        #         })
+                st = time.time()
+                combined = self.sess.run(results_all, feed_dict={
+                    mc: mol_coords,
+                    mi: mol_offsets
+                })
 
-        #         if i > 0:
-        #             tot_time += time.time() - st
+                if i > 0:
+                    tot_time += time.time() - st
 
-        #     return tot_time
+            return tot_time
 
-        # executor = ThreadPoolExecutor(4)
-        # futures = []
-        # delta = 0
+        executor = ThreadPoolExecutor(4)
+        futures = []
+        delta = 0
 
-        # for p in range(n_threads):
-        #     futures.append(executor.submit(closure))
-        # for f in futures:
-        #     delta += f.result()
+        for p in range(n_threads):
+            futures.append(executor.submit(closure))
+        for f in futures:
+            delta += f.result()
 
-        # print("Time Per Mol:", delta/((batches_per_thread-1)*n_threads*num_mols_per_batch))
+        print("Time Per Mol:", delta/((batches_per_thread-1)*n_threads*num_mols_per_batch))
 
 
 
 
-
-        # sess2 = tf.Session()
-        # # sess2 = tf_debug.LocalCLIDebugWrapperSession(sess2)
-        # # combined = sess2.run(results_all, feed_dict={
-        # #     mc: mol_coords,
-        # #     mi: mol_idxs,
-        # #     nm: num_mols
-        # # })
 
         # num_mols_per_batch = 256
 
-        mol_coords = []
-        mol_offsets = []
-        last_idx = len(mol_coords)
 
-        for mol_idx in range(num_mols_per_batch):
-            num_atoms = np.random.randint(12,64)
-            for i in range(num_atoms):
-                atom_type = np.random.randint(0,4)
-                x = np.random.rand()
-                y = np.random.rand()
-                z = np.random.rand()
-                mol_coords.append((atom_type, x, y, z))
+        # profiling/benchmarking
+        # mol_coords = []
+        # mol_offsets = []
+        # last_idx = len(mol_coords)
 
-            mol_offsets.append((last_idx, len(mol_coords)))
-            last_idx = len(mol_coords)
+        # for mol_idx in range(num_mols_per_batch):
+        #     num_atoms = np.random.randint(12,64)
+        #     for i in range(num_atoms):
+        #         atom_type = np.random.randint(0,4)
+        #         x = np.random.rand()
+        #         y = np.random.rand()
+        #         z = np.random.rand()
+        #         mol_coords.append((atom_type, x, y, z))
 
-        mol_coords = np.array(mol_coords, dtype=np.float32)
-        mol_offsets = np.array(mol_offsets, dtype=np.int32)
+        #     mol_offsets.append((last_idx, len(mol_coords)))
+        #     last_idx = len(mol_coords)
+
+        # mol_coords = np.array(mol_coords, dtype=np.float32)
+        # mol_offsets = np.array(mol_offsets, dtype=np.int32)
+
+
+        # dbg_sess = tf_debug.LocalCLIDebugWrapperSession(self.sess)
+        # combined = dbg_sess.run(results_all, feed_dict={mc: mol_coords, mi: mol_offsets})
+        # dbg_sess.close()
+
+
 
         options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
         run_metadata = tf.RunMetadata()
@@ -308,7 +307,7 @@ class TestSymmetrizer(unittest.TestCase):
 
         fetched_timeline = timeline.Timeline(run_metadata.step_stats)
         chrome_trace = fetched_timeline.generate_chrome_trace_format()
-        with open('/home/yutong/while_loop.json', 'w') as f:
+        with open('/home/yutong/while_loop2.json', 'w') as f:
             f.write(chrome_trace)
 
         # print("Time Per Mol:", (time.time() - st)/num_mols)
