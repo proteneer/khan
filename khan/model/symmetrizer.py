@@ -45,7 +45,8 @@ class Symmetrizer():
         Symmetrizer implements the ANI symmetry functions as described in doi:10.1039/C6SC05720A
         In particular, the radial_symmetry function implements eq (3) and the angular_symmetry
         function implements eq (4) of the paper. Note: Unless mentioned explicitly, all floating
-        point numbers should be float32s.
+        point numbers should be float32s. All distance units are in Angstroms, and all angular
+        units are in Radians.
 
         Parameters
         ----------
@@ -73,7 +74,6 @@ class Symmetrizer():
         A_zeta: float
             Angular exponent (typically used to normalize to the radial parts)
 
-
         """
 
         self.max_atom_types = 4 # CNOH
@@ -88,7 +88,7 @@ class Symmetrizer():
         self.A_thetas = np.array(A_thetas, dtype=np.float32)
         self.A_zeta = np.float32(A_zeta)
 
-        self.gdb_sess = tf.Session()
+        self.gdb_sess = tf.Session() # for debugging purposes only.
 
     def featurize_one(self, atom_matrix):
         """
@@ -116,7 +116,9 @@ class Symmetrizer():
         Parameters
         ----------
         batched_atom_matrix: tf.Tensor
-            Atom matrices of shape (None, 4), representing compacted molecules.
+            Atom matrices of shape (None, 4), representing compacted molecules. Rank-1 is a 4-tuple
+            comprised of (t, x, y, z), where t is the compacted atomic number and (xyz) is a 3-tuple
+            denoting the coordinates.
     
         offsets: tf.Tensor
             Tensor of shape (None, 2), where rank 1 indicates the start and end such that
