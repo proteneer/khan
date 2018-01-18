@@ -33,7 +33,7 @@ class AtomNN():
         self.bs = []
         self.As = [features] # neurons
         self.atom_type = atom_type
-        # print('--')
+
         for idx in range(1, len(layer_sizes)):
             # initial_W = np.zeros((layer_sizes[idx-1], layer_sizes[idx]), dtype=np.float32)
             # initial_b = np.zeros((layer_sizes[idx],), dtype=np.float32)
