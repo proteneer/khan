@@ -255,6 +255,7 @@ class TestSymmetrizer(unittest.TestCase):
         for p in range(n_threads):
             futures.append(executor.submit(closure))
         for f in futures:
+            # This is HORRIBLY incorrect - time overlaps! need to reduce this.
             delta += f.result()
 
         print("Time Per Mol:", delta/((batches_per_thread-1)*n_threads*num_mols_per_batch))

@@ -27,12 +27,13 @@ class AtomNN():
 
         assert layer_sizes[-1] == 1
 
+
         self.features = features
         self.Ws = []
         self.bs = []
         self.As = [features] # neurons
         self.atom_type = atom_type
-
+        # print('--')
         for idx in range(1, len(layer_sizes)):
             # initial_W = np.zeros((layer_sizes[idx-1], layer_sizes[idx]), dtype=np.float32)
             # initial_b = np.zeros((layer_sizes[idx],), dtype=np.float32)
@@ -42,11 +43,11 @@ class AtomNN():
 
             initial_W = tf.get_variable("W"+name, (x, y), np.float32, tf.contrib.layers.xavier_initializer())
             initial_b = tf.get_variable("b"+name, (y), np.float32, tf.contrib.layers.xavier_initializer())
-            
-            print(initial_W.shape, initial_b.shape)
 
             W = tf.Variable(initial_W)
             b = tf.Variable(initial_b)
+            # print(initial_W.shape, initial_b.shape)
+
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
                 A = tf.exp(-A * A)
@@ -79,8 +80,9 @@ class MoleculeNN():
     def __init__(
         self,
         type_map,
-        batched_atom_features,
-        offsets,
+        atom_type_features,
+        gather_idxs,
+        mol_idxs,
         layer_sizes):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
@@ -90,68 +92,34 @@ class MoleculeNN():
         type_map: list of str
             Maximum number of atom types. Eg: ["H", "C", "N", "O"]
 
-        batched_atom_features: tf.Tensor
-            Tensor comprised of compacted and featurized molecules.
+        atom_type_features: list of tf.Tensors
+            Features for each atom_type.
 
-        offsets:
-            Tensor of shape (None, 2), where rank 1 indicates the start and end such that
-            batch_atom_matrix[start:end, :] is a featurized molecule.
+        gather_idxs: tf.Tensor
+            Tensor of shape (num_atoms,) of dtype int32 such that a[gather_idx[i]] = original_pos
 
+        mol_idxs: tf.Tensor
+            Tensor of shape (num_atoms,) of dtype int32 such that mol[i] is the molecule index in the
+            gathered atom list.
 
         layer_sizes: list of ints
             See documentation of AtomNN for details.
 
         """
 
-        self.max_atom_types = len(type_map)
+        max_atom_types = len(type_map)
+        atom_nrgs = [] # len of type-map, one batch of energies for each atom_type
+        self.feats = atom_type_features
         self.anns = []
 
-        atom_types = tf.cast(batched_atom_features[:, 0], dtype=tf.int32)
-        atom_feats = batched_atom_features[:, 1:]
-
-        group_feats = tf.dynamic_partition(
-            atom_feats,
-            atom_types,
-            num_partitions=self.max_atom_types) # feature shape: (batch_size across all atoms, )
-
-        atom_nrgs = []
-
-
-        for group_type, feats in enumerate(group_feats):
-            # print(layer_sizes)
-            ann = AtomNN(feats, layer_sizes, type_map[group_type])
+        for type_idx, atom_type in enumerate(type_map):
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type)
             self.anns.append(ann)
             atom_nrgs.append(ann.atom_energies())
 
-        atom_idxs = tf.dynamic_partition(
-            tf.range(tf.shape(atom_types)[0]),
-            atom_types,
-            num_partitions=self.max_atom_types)
-
-        all_atom_nrgs = tf.dynamic_stitch(atom_idxs, atom_nrgs)
-
-        num_mols = tf.shape(offsets)[0]
-
-        ta_result = tf.TensorArray(
-            dtype=tf.float32,
-            size=num_mols,
-            name="ta_results",
-            element_shape=(),
-        )
-
-        def compute(idx, accum):
-            start_idx = offsets[idx][0]
-            end_idx = offsets[idx][1]
-            mol_nrg = tf.reduce_sum(all_atom_nrgs[start_idx:end_idx])
-            accum = accum.write(idx, mol_nrg)
-            return (idx+1, accum)
-
-        _, ta_results = tf.while_loop(
-            lambda i, _: i < num_mols, # condition
-            compute, # body
-            (0, ta_result)) # initial_state
-
-        self.mol_nrgs = ta_results.stack()
+        atom_nrgs = self.atom_nrgs_before = tf.concat(atom_nrgs, axis=0)
+        self.atom_nrgs = tf.gather(atom_nrgs, gather_idxs)
+        self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
     def molecule_energies(self):
         """
@@ -173,4 +141,4 @@ class MoleculeNN():
             energy of the molecule.
 
         """
-        return tf.reduce_sum(self.mol_nrgs)
+        return self.mol_nrgs

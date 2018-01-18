@@ -150,6 +150,8 @@ class Symmetrizer():
             lambda i, _: i < num_mols, # condition
             compute, # body
             (0, ta_result)) # initial_state
+        # todo: change max parallel iterations
+
 
         return ta_results.stack()
 
