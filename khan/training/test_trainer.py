@@ -7,6 +7,7 @@ import time
 import tensorflow as tf
 import unittest
 
+from khan.model.symmetrizer import Symmetrizer
 from khan.model.nn import MoleculeNN
 from khan.training.trainer import Trainer
 
@@ -27,7 +28,8 @@ class TestTrainer(unittest.TestCase):
     def tearDown(self):
         self.sess.close()
 
-    def test_benchmark(self):
+
+    def test_benchmark_precomputed(self):
 
         batch_size = 1024
 
@@ -64,7 +66,7 @@ class TestTrainer(unittest.TestCase):
             layer_sizes=(feat_size, 256, 128, 64, 1))
 
         trainer = Trainer(mnn, yt)
-        results_all = trainer.train()
+        results_all = trainer.get_train_op()
 
         self.sess.run(tf.global_variables_initializer())
 

@@ -121,7 +121,7 @@ class MoleculeNN():
         self.atom_nrgs = tf.gather(atom_nrgs, gather_idxs)
         self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
-    def molecule_energies(self):
+    def predict_op(self):
         """
         Compute molecular energies for a batch of molecules.
 
