@@ -5,15 +5,9 @@ import numpy as np
 import tensorflow as tf
 
 from khan.model.nn import AtomNN, MoleculeNN
+from khan.utils.helpers import inv
 
 from concurrent.futures import ThreadPoolExecutor
-
-# invert a permutation
-def inv(p):
-    inverse = [0] * len(p)
-    for i, p in enumerate(p):
-        inverse[p] = i
-    return inverse
 
 class TestNN(unittest.TestCase):
 
