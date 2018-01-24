@@ -28,7 +28,6 @@ class TestTrainer(unittest.TestCase):
     def tearDown(self):
         self.sess.close()
 
-
     def test_benchmark_precomputed(self):
 
         batch_size = 1024

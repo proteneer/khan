@@ -43,7 +43,7 @@ class TestDataset():
 
         rdy = RawDataset(all_Xs, all_ys)
 
-        for idx, (_, _, ys) in enumerate(rdy.iterate(batch_size=3, load_ys=True)):
+        for idx, (_, _, ys) in enumerate(rdy.iterate(batch_size=3)):
             if idx == 0:
                 np.testing.assert_array_equal(ys, np.arange(0, 3, dtype=np.float32))
             elif idx == 1:
@@ -57,6 +57,7 @@ class TestDataset():
 
         dummy_elem = [1.0, 2.0, 3.0, 4.0]
         all_Xs = []
+        all_ys = []
 
         for mol_idx in range(125):
             num_atoms = np.random.randint(12,64)
@@ -68,8 +69,9 @@ class TestDataset():
                 z = np.random.rand()
                 mol_coords.append((atom_type, x, y, z))
             all_Xs.append(np.array(mol_coords, dtype=np.float32))
+            all_ys.append(np.random.rand())
 
-        rd = RawDataset(all_Xs)
+        rd = RawDataset(all_Xs, all_ys)
 
         sym = Symmetrizer()
 
@@ -82,17 +84,21 @@ class TestDataset():
             with tempfile.TemporaryDirectory() as tmpd:
                 batch_size = 16
                 fd = rd.featurize(batch_size=batch_size, data_dir=tmpd, symmetrizer=sym)
-                for batch_idx, (af, gi, mi) in enumerate(fd.iterate(shuffle=False)):
+                for batch_idx, (af, ao, gi, mi, my) in enumerate(fd.iterate(shuffle=False)):
+
+                    assert len(ao) > 0
+                    assert len(ao) <= 4
 
                     results = af[gi]
 
                     s_m_idx = batch_idx*batch_size
                     e_m_idx = min((batch_idx+1)*batch_size, len(all_Xs))
 
-                    pre_concat = all_Xs[s_m_idx:e_m_idx]
+                    pre_concat_X = all_Xs[s_m_idx:e_m_idx]
+                    pre_concat_y = all_ys[s_m_idx:e_m_idx]
 
-                    batch_Xs = np.concatenate(pre_concat, axis=0)
-                    batch_offsets = np.array(compute_offsets(pre_concat), dtype=np.int32)
+                    batch_Xs = np.concatenate(pre_concat_X, axis=0)
+                    batch_offsets = np.array(compute_offsets(pre_concat_X), dtype=np.int32)
 
                     expected = sess.run(feat_op, feed_dict={
                         bam: batch_Xs,
@@ -101,8 +107,12 @@ class TestDataset():
 
                     np.testing.assert_array_equal(results, expected)
 
-                    expected_mis = []
-                    for m_idx, mm in enumerate(pre_concat):
-                        expected_mis.extend([m_idx]*len(mm))
+                    expected_mol_idxs = []
+                    for m_idx, mm in enumerate(pre_concat_X):
+                        expected_mol_idxs.extend([m_idx]*len(mm))
 
-                    np.testing.assert_array_equal(mi, expected_mis)
+                    np.testing.assert_array_equal(mi, expected_mol_idxs)
+                    np.testing.assert_array_equal(my, pre_concat_y)
+
+                    # todo: add a test for atom_offsets
+                    # print(ao)

@@ -1,8 +1,14 @@
 import numpy as np
+import tempfile
+import time
+import tensorflow as tf
 
+from khan.model.nn import MoleculeNN
+from khan.training.trainer import Trainer
 from khan.data import pyanitools as pya
-
 from khan.data.dataset import RawDataset, FeaturizedDataset
+
+from concurrent.futures import ThreadPoolExecutor
 
 HARTREE_TO_KCAL_PER_MOL = 627.509
 
@@ -96,21 +102,115 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
 
+            # debug
+            if len(Xs) > 16000:
+                break
+
     return Xs, ys
 
 if __name__ == "__main__":
 
     Xs, ys = load_hdf5_files([
-        "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
+        # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
         # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s02.h5",
         # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s03.h5",
+        "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
     ])
 
-    # rd = RawDataset(Xs, ys)
+    # Xs, ys = Xs[:12000], ys[:12000]
 
-    # fd = rd.featurize(batch_size=64, data_dir="/tmp")
+    rd = RawDataset(Xs, ys)
+
+    batch_size = 1024
+
+    # data_dir = tempfile.mkdtemp()
+
+    data_dir = "/media/yutong/fast_datablob/v3"
+
+    # print("featurizing...")
+    # fd = rd.featurize(batch_size=batch_size, data_dir=data_dir)
+    
+    fd = FeaturizedDataset(data_dir)
+    print("done...")
+    # batch_size = 1024
+
+    f0_enq = tf.placeholder(dtype=tf.float32)
+    f1_enq = tf.placeholder(dtype=tf.float32)
+    f2_enq = tf.placeholder(dtype=tf.float32)
+    f3_enq = tf.placeholder(dtype=tf.float32)
+    gi_enq = tf.placeholder(dtype=tf.int32)
+    mi_enq = tf.placeholder(dtype=tf.int32)
+    yt_enq = tf.placeholder(dtype=tf.float32)
+
+    staging = tf.contrib.staging.StagingArea(
+        capacity=10, dtypes=[
+            tf.float32,
+            tf.float32,
+            tf.float32,
+            tf.float32,
+            tf.int32,
+            tf.int32,
+            tf.float32])
+
+    put_op = staging.put([f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq])
+    get_op = staging.get()
+
+    # feat_size = 768
+
+    f0, f1, f2, f3, gi, mi, yt = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
+
+    mnn = MoleculeNN(
+        type_map=["H", "C", "N", "O"],
+        atom_type_features=[f0, f1, f2, f3],
+        gather_idxs=gi,
+        mol_idxs=mi,
+        layer_sizes=(384, 256, 128, 64, 1))
+
+    trainer = Trainer(mnn, yt)
+    results_all = trainer.get_train_op()
+
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+
+    num_epochs = 32
+
+    def submitter():
+        for _ in range(num_epochs):
+            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd.iterate()):
+                try:
+                    sess.run(put_op, feed_dict={
+                        f0_enq: f0,
+                        f1_enq: f1,
+                        f2_enq: f2,
+                        f3_enq: f3,
+                        gi_enq: gi,
+                        mi_enq: mi,
+                        yt_enq: yt,
+                    })
+                except Exception as e:
+                    print("OMG WTF BBQ", e)
+
+    executor = ThreadPoolExecutor(4)
+
+    executor.submit(submitter)
+
+    tot_time = 0
+    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    
+    print("num batches", fd.num_batches())
+
+    st = time.time()
+    for e in range(num_epochs):
+        print("epoch:", e)
+        for i in range(fd.num_batches()):
+            # print("running", i)
 
 
-    fd = FeaturizedDataset("/tmp")
-    for af, gi, mi in fd.iterate():
-        print(af, gi, mi)
+            sess.run(results_all)
+
+    tot_time = time.time() - st # this logic is a little messed up
+
+    tpm = tot_time/(fd.num_batches()*batch_size*num_epochs)
+    print("Time Per Mol:", tpm, "seconds")
+    print("Samples per minute:", 60/tpm)

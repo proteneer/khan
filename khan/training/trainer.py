@@ -23,6 +23,7 @@ class Trainer():
     def get_train_op(self):
         return self.train_op
 
+
     # def get_atm(self)
 
     # def get_input_ops(self, precomputed_features=False):

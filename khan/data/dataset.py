@@ -4,6 +4,7 @@ import numpy as np
 import queue
 import os
 
+from multiprocessing.dummy import Pool
 from concurrent.futures import ThreadPoolExecutor
 
 import tensorflow as tf
@@ -26,7 +27,7 @@ class RawDataset():
     def num_batches(self, batch_size):
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate(self, batch_size, load_ys=False):
+    def iterate(self, batch_size):
 
         n_batches = self.num_batches(batch_size)
 
@@ -43,7 +44,7 @@ class RawDataset():
 
             X_batch_offsets -= X_batch_offsets[0][0] # convert into batch-wise indices
 
-            if self.all_ys is not None and load_ys:
+            if self.all_ys is not None:
                 yield Xs, X_batch_offsets, self.all_ys[s_m_idx:e_m_idx]
             else:
                 yield Xs, X_batch_offsets, None
@@ -70,19 +71,21 @@ class RawDataset():
 
         if symmetrizer is None:
             symmetrizer = Symmetrizer()
-        
+
         feat_op = symmetrizer.featurize_batch(get_op[0], get_op[1])
         session = tf.Session()
 
-        all_xos = [] # lists are thread safe due to GIL
-        all_ys = [] # lists are thread safe
+        all_ais = [] # batches of atom type offsets
+        all_xos = [] # batches of mol offsets lists
+        all_ys = [] 
 
         def submitter():
-            for b_idx, (x_b, x_o, yy) in enumerate(self.iterate(batch_size, load_ys=False)):
+            for b_idx, (x_b, x_o, yy) in enumerate(self.iterate(batch_size)):
                 session.run(put_op, feed_dict={
                     x_b_enq: x_b,
                     x_o_enq: x_o
                 })
+                all_ais.append(x_b[:, 0])
                 all_xos.append(x_o)
                 all_ys.append(yy)
 
@@ -91,11 +94,14 @@ class RawDataset():
         def writer():
             fd = FeaturizedDataset(data_dir)
             for s_idx in range(self.num_batches(batch_size)):
+                print("writing...", s_idx)
                 feat_data = q.get()
-                xo, xy = all_xos[s_idx], all_ys[s_idx]
+                ai, xo, xy = all_ais[s_idx], all_xos[s_idx], all_ys[s_idx]
+                all_ais[s_idx] = None
                 all_xos[s_idx] = None # clear memory
                 all_ys[s_idx] = None # clear memory
-                fd.write(s_idx, feat_data, xo, xy)
+
+                fd.write(s_idx, feat_data, ai, xo, xy)
             return fd
 
         executor = ThreadPoolExecutor(2)
@@ -111,6 +117,16 @@ class RawDataset():
         session.close()
         return fd
 
+def generate_fnames(data_dir, s_idx):
+    return [
+        os.path.join(data_dir, str(s_idx)+"_0.npy"),
+        os.path.join(data_dir, str(s_idx)+"_1.npy"),
+        os.path.join(data_dir, str(s_idx)+"_2.npy"),
+        os.path.join(data_dir, str(s_idx)+"_3.npy"),
+        os.path.join(data_dir, str(s_idx)+"_gi.npy"),
+        os.path.join(data_dir, str(s_idx)+"_mi.npy"),
+        os.path.join(data_dir, str(s_idx)+"_ys.npy")
+    ]    
 
 class FeaturizedDataset():
 
@@ -118,32 +134,112 @@ class FeaturizedDataset():
         self.data_dir = data_dir
 
     def iterate(self, shuffle=False):
-        path = os.path.join(self.data_dir, '*.npz')
-        n_shards = len(glob.glob(os.path.join(self.data_dir, '*.npz')))
+        # path = os.path.join(self.data_dir, '*.npz')
+        n_shards = self.num_batches()
 
-        perm = np.arange(n_shards)
+        try:
+            perm = np.arange(n_shards)
 
-        if shuffle:
-            np.shuffle(perm)
+            if shuffle:
+                np.shuffle(perm)
 
-        for shard_idx in perm:
-            path = os.path.join(self.data_dir, str(shard_idx) + ".npz")
-            res = np.load(path, allow_pickle=False)
-            yield res['af'], res['gi'], res['mi']
+            def load_shard(s_idx):
+                fnames = generate_fnames(self.data_dir, s_idx)
+                res = []
+                for f in fnames:
+                    # print("loading", f)
+                    res.append(np.load(f, allow_pickle=False, mmap_mode='r'))
 
-    def write(self, s_idx, batched_Xs, mol_offsets, mol_ys):
-        # save as a more efficient format for IO when training
-        scatter_idxs = np.argsort(batched_Xs[:, 0],) # note that this isn't stable.
-        atom_feats = batched_Xs[scatter_idxs]
-        gather_idxs = inv(scatter_idxs)
-        mol_idxs = []
+                return res
 
-        for mol_idx, (s, e) in enumerate(mol_offsets):
-            mol_idxs.append(np.ones(shape=(e-s,), dtype=np.int32)*mol_idx)
+            pool = Pool(1)  # mp.dummy aliases ThreadPool to Pool
+            # path = os.path.join(self.data_dir, str(perm[0]) + ".npz")
+            # next_shard = pool.apply_async(np.load, (path,))
+            next_shard = pool.apply_async(load_shard, (perm[0],))
 
-        mol_idxs = np.concatenate(mol_idxs)
+            for ss_idx, shard_idx in enumerate(perm):
 
-        fname = os.path.join(self.data_dir, str(s_idx)+".npz")
+                res = next_shard.get()
+                if ss_idx != len(perm) - 1:
+                    next_shard = pool.apply_async(load_shard, (shard_idx,))
+                else:
+                    pool.close()
 
-        with open(fname, "wb") as fh:
-            np.savez(fh, af=atom_feats, gi=gather_idxs, mi=mol_idxs)
+                yield res
+                # yield res['f0'], res['f1'], res['f2'], res['f3'], res['gi'], res['mi'], res['my']
+        except Exception as e:
+            print("WTF OM?", e)
+
+    def num_batches(self):
+        path = os.path.join(self.data_dir, '*.npy')
+        return len(glob.glob(os.path.join(self.data_dir, '*.npy'))) // 7
+
+    def write(self, s_idx, batched_feat_Xs, atom_type_idxs, mol_offsets, mol_ys):
+
+
+        try:
+            # save as a more efficient format for IO when training
+            scatter_idxs = np.argsort(atom_type_idxs) # note that this isn't stable.
+            scatter_atom_feats = batched_feat_Xs[scatter_idxs]
+
+            # print(scatter_atom_feats_types)
+
+            atom_type_idxs = atom_type_idxs[scatter_idxs]
+            atom_type_offsets = []
+
+            last_idx = 0
+            for a_idx, a_type in enumerate(atom_type_idxs):
+                if a_idx == len(atom_type_idxs) - 1:
+                    atom_type_offsets.append((last_idx, len(atom_type_idxs)))
+                elif atom_type_idxs[a_idx] != atom_type_idxs[a_idx+1]:
+                    atom_type_offsets.append((last_idx, a_idx))
+                    last_idx = a_idx
+
+            atom_type_offsets = np.array(atom_type_offsets, dtype=np.int32)
+
+            gather_idxs = inv(scatter_idxs)
+            mol_idxs = []
+
+            for mol_idx, (s, e) in enumerate(mol_offsets):
+                mol_idxs.append(np.ones(shape=(e-s,), dtype=np.int32)*mol_idx)
+
+            mol_idxs = np.concatenate(mol_idxs)
+
+            # fname = os.path.join(self.data_dir, str(s_idx)+".npz")
+
+            # with open(fname, "wb") as fh:
+            if mol_ys is None:
+                mol_ys = np.zeros(0)
+
+            feats = []
+            for offsets in atom_type_offsets:
+                start = offsets[0]
+                end = offsets[1]
+                feats.append(scatter_atom_feats[start:end])
+
+            while len(feats) < 4:
+                feats.append(np.zeros(shape=(0, feats[0].shape[1]), dtype=np.float32))
+
+
+            objs = [feats[0], feats[1], feats[2], feats[3], gather_idxs, mol_idxs, mol_ys]
+            fnames = generate_fnames(self.data_dir, s_idx)
+
+            for o, f in zip(objs, fnames):
+                np.save(f, o, allow_pickle=False)
+
+
+            # np.save(
+
+            #     allow_pickle=False)
+
+            # np.savez(fh,
+            #     f0=feats[0],
+            #     f1=feats[1],
+            #     f2=feats[2],
+            #     f3=feats[3],
+            #     gi=gather_idxs,
+            #     mi=mol_idxs,
+            #     my=mol_ys)
+
+        except Exception as e:
+            print("??", e)
