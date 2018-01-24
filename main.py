@@ -3,7 +3,7 @@ import tempfile
 import time
 import tensorflow as tf
 
-from khan.model.nn import MoleculeNN
+from khan.model.nn import MoleculeNN, mnn_staging
 from khan.training.trainer import Trainer
 from khan.data import pyanitools as pya
 from khan.data.dataset import RawDataset, FeaturizedDataset
@@ -90,11 +90,14 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
             for z in Z:
                 offset += atomizationEnergies[z]
 
+
             for k in range(len(E)):
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
                 y = E[k] - offset
+
+                # print(E[k], offset, y)
                 ys.append(y)
 
                 # print(np.expand_dims(Z, 1), R[k])
@@ -130,53 +133,42 @@ if __name__ == "__main__":
     # print("featurizing...")
     # fd = rd.featurize(batch_size=batch_size, data_dir=data_dir)
     
+    (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq), \
+    (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq), \
+    put_op = mnn_staging()
+
     fd = FeaturizedDataset(data_dir)
-    print("done...")
-    # batch_size = 1024
-
-    f0_enq = tf.placeholder(dtype=tf.float32)
-    f1_enq = tf.placeholder(dtype=tf.float32)
-    f2_enq = tf.placeholder(dtype=tf.float32)
-    f3_enq = tf.placeholder(dtype=tf.float32)
-    gi_enq = tf.placeholder(dtype=tf.int32)
-    mi_enq = tf.placeholder(dtype=tf.int32)
-    yt_enq = tf.placeholder(dtype=tf.float32)
-
-    staging = tf.contrib.staging.StagingArea(
-        capacity=10, dtypes=[
-            tf.float32,
-            tf.float32,
-            tf.float32,
-            tf.float32,
-            tf.int32,
-            tf.int32,
-            tf.float32])
-
-    put_op = staging.put([f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq])
-    get_op = staging.get()
-
-    # feat_size = 768
-
-    f0, f1, f2, f3, gi, mi, yt = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
 
     mnn = MoleculeNN(
         type_map=["H", "C", "N", "O"],
-        atom_type_features=[f0, f1, f2, f3],
-        gather_idxs=gi,
-        mol_idxs=mi,
+        atom_type_features=[f0_deq, f1_deq, f2_deq, f3_deq],
+        gather_idxs=gi_deq,
+        mol_idxs=mi_deq,
         layer_sizes=(384, 256, 128, 64, 1))
 
-    trainer = Trainer(mnn, yt)
-    results_all = trainer.get_train_op()
+    trainer = Trainer(mnn, yt_deq)
+    train_op_rmse = trainer.get_train_op_rmse()
+    train_op_exp = trainer.get_train_op_exp()
+    loss_op = trainer.get_loss_op()
+    predict_op = trainer.model.predict_op()
+    max_norm = trainer.get_maxnorm_ops()
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
 
-    num_epochs = 32
+    num_epochs = 2048
 
     def submitter():
         for _ in range(num_epochs):
-            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd.iterate()):
+            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd.iterate(shuffle=True)):
+
+                # print(np.max(f0), f0)
+                # print(np.max(f1), f1)
+                # print(np.max(f2), f2)
+                # print(np.max(f3), f3)
+
+                # assert 0
+
                 try:
                     sess.run(put_op, feed_dict={
                         f0_enq: f0,
@@ -205,9 +197,13 @@ if __name__ == "__main__":
         print("epoch:", e)
         for i in range(fd.num_batches()):
             # print("running", i)
-
-
-            sess.run(results_all)
+            # res = sess.run([train_op, loss_op])
+            # res = sess.run([predict_op, train_op, loss_op])
+            if e < 32:
+                res = sess.run([max_norm, trainer.rmse, train_op_rmse])
+            else:
+                res = sess.run([max_norm, trainer.exp_loss, train_op_exp])
+            print(res[1])
 
     tot_time = time.time() - st # this logic is a little messed up
 

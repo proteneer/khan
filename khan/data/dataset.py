@@ -141,7 +141,7 @@ class FeaturizedDataset():
             perm = np.arange(n_shards)
 
             if shuffle:
-                np.shuffle(perm)
+                np.random.shuffle(perm)
 
             def load_shard(s_idx):
                 fnames = generate_fnames(self.data_dir, s_idx)
@@ -153,8 +153,6 @@ class FeaturizedDataset():
                 return res
 
             pool = Pool(1)  # mp.dummy aliases ThreadPool to Pool
-            # path = os.path.join(self.data_dir, str(perm[0]) + ".npz")
-            # next_shard = pool.apply_async(np.load, (path,))
             next_shard = pool.apply_async(load_shard, (perm[0],))
 
             for ss_idx, shard_idx in enumerate(perm):
@@ -166,7 +164,7 @@ class FeaturizedDataset():
                     pool.close()
 
                 yield res
-                # yield res['f0'], res['f1'], res['f2'], res['f3'], res['gi'], res['mi'], res['my']
+
         except Exception as e:
             print("WTF OM?", e)
 
@@ -182,7 +180,6 @@ class FeaturizedDataset():
             scatter_idxs = np.argsort(atom_type_idxs) # note that this isn't stable.
             scatter_atom_feats = batched_feat_Xs[scatter_idxs]
 
-            # print(scatter_atom_feats_types)
 
             atom_type_idxs = atom_type_idxs[scatter_idxs]
             atom_type_offsets = []
@@ -205,9 +202,6 @@ class FeaturizedDataset():
 
             mol_idxs = np.concatenate(mol_idxs)
 
-            # fname = os.path.join(self.data_dir, str(s_idx)+".npz")
-
-            # with open(fname, "wb") as fh:
             if mol_ys is None:
                 mol_ys = np.zeros(0)
 
@@ -220,26 +214,12 @@ class FeaturizedDataset():
             while len(feats) < 4:
                 feats.append(np.zeros(shape=(0, feats[0].shape[1]), dtype=np.float32))
 
-
             objs = [feats[0], feats[1], feats[2], feats[3], gather_idxs, mol_idxs, mol_ys]
             fnames = generate_fnames(self.data_dir, s_idx)
 
             for o, f in zip(objs, fnames):
                 np.save(f, o, allow_pickle=False)
 
-
-            # np.save(
-
-            #     allow_pickle=False)
-
-            # np.savez(fh,
-            #     f0=feats[0],
-            #     f1=feats[1],
-            #     f2=feats[2],
-            #     f3=feats[3],
-            #     gi=gather_idxs,
-            #     mi=mol_idxs,
-            #     my=mol_ys)
 
         except Exception as e:
             print("??", e)

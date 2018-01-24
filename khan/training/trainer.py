@@ -13,16 +13,44 @@ class Trainer():
 
         """
         self.model = model
-        self.tau = 0.5
-        self.rmse = tf.sqrt(tf.reduce_mean(tf.squared_difference(self.model.predict_op(), labels)))
-        self.exp_loss = self.tau * tf.exp(self.rmse /self.tau) 
-        self.optimizer = tf.train.AdamOptimizer() # change defaults
+        self.l2 = tf.squared_difference(self.model.predict_op(), labels)
+        self.rmse = tf.sqrt(tf.reduce_mean(self.l2))
+        # float64 is for numerical stability
+
+        self.exp_loss = tf.exp(tf.cast(self.rmse, dtype=tf.float64))
+        self.optimizer_rmse = tf.train.AdamOptimizer() # change defaults
         # todo: add a step for max normalization
-        self.train_op = self.optimizer.minimize(self.exp_loss)
+        self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse)
+        self.optimizer_exp = tf.train.AdamOptimizer() # change defaults
+        self.train_op_exp = self.optimizer_exp.minimize(self.exp_loss)
 
-    def get_train_op(self):
-        return self.train_op
+        # maxnorm
+        ws = self.weight_matrices()
+        max_norm_ops = []
 
+        for w in ws:
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
+
+        self.max_norm_ops = max_norm_ops
+
+    def weight_matrices(self):
+        weights = []
+        for ann in self.model.anns:
+            for W in ann.Ws:
+                weights.append(W)
+        return weights
+
+    def get_maxnorm_ops(self):
+        return self.max_norm_ops
+
+    def get_train_op_rmse(self):
+        return self.train_op_rmse
+
+    def get_train_op_exp(self):
+        return self.train_op_exp
+
+    def get_loss_op(self):
+        return self.exp_loss
 
     # def get_atm(self)
 

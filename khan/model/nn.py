@@ -35,22 +35,19 @@ class AtomNN():
         self.atom_type = atom_type
 
         for idx in range(1, len(layer_sizes)):
-            # initial_W = np.zeros((layer_sizes[idx-1], layer_sizes[idx]), dtype=np.float32)
-            # initial_b = np.zeros((layer_sizes[idx],), dtype=np.float32)
-
-            x, y = layer_sizes[idx-1], layer_sizes[idx]
+            x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            initial_W = tf.get_variable("W"+name, (x, y), np.float32, tf.contrib.layers.xavier_initializer())
-            initial_b = tf.get_variable("b"+name, (y), np.float32, tf.contrib.layers.xavier_initializer())
+            W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x))
+            b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer)
 
-            W = tf.Variable(initial_W)
-            b = tf.Variable(initial_b)
-            # print(initial_W.shape, initial_b.shape)
 
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
+                # print("EXP")
                 A = tf.exp(-A * A)
+            # else:
+                # print("NORM")
 
             self.Ws.append(W)
             self.bs.append(b)
@@ -73,6 +70,39 @@ class AtomNN():
 
         """
         return self.As[-1]
+
+def mnn_staging():
+
+    f0_enq = tf.placeholder(dtype=tf.float32)
+    f1_enq = tf.placeholder(dtype=tf.float32)
+    f2_enq = tf.placeholder(dtype=tf.float32)
+    f3_enq = tf.placeholder(dtype=tf.float32)
+    gi_enq = tf.placeholder(dtype=tf.int32)
+    mi_enq = tf.placeholder(dtype=tf.int32)
+    yt_enq = tf.placeholder(dtype=tf.float32)
+
+    staging = tf.contrib.staging.StagingArea(
+        capacity=10, dtypes=[
+            tf.float32,
+            tf.float32,
+            tf.float32,
+            tf.float32,
+            tf.int32,
+            tf.int32,
+            tf.float32])
+
+    put_op = staging.put([f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq])
+    get_op = staging.get()
+
+    # feat_size = 768
+
+    f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
+
+    return [
+        (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq),
+        (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq),
+        put_op
+    ]
 
 
 class MoleculeNN():
@@ -108,16 +138,16 @@ class MoleculeNN():
         """
 
         max_atom_types = len(type_map)
-        atom_nrgs = [] # len of type-map, one batch of energies for each atom_type
+        atom_type_nrgs = [] # len of type-map, one batch of energies for each atom_type
         self.feats = atom_type_features
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
             ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type)
             self.anns.append(ann)
-            atom_nrgs.append(ann.atom_energies())
+            atom_type_nrgs.append(ann.atom_energies())
 
-        atom_nrgs = self.atom_nrgs_before = tf.concat(atom_nrgs, axis=0)
+        atom_nrgs = tf.concat(atom_type_nrgs, axis=0)
         self.atom_nrgs = tf.gather(atom_nrgs, gather_idxs)
         self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
