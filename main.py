@@ -1,7 +1,10 @@
+import os
 import numpy as np
 import tempfile
 import time
 import tensorflow as tf
+import sklearn
+import sklearn.model_selection
 
 from khan.model.nn import MoleculeNN, mnn_staging
 from khan.training.trainer import Trainer
@@ -113,31 +116,58 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
 
 if __name__ == "__main__":
 
-    Xs, ys = load_hdf5_files([
-        # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
-        # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s02.h5",
-        # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s03.h5",
-        "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
-    ])
+    data_dir_train = "/media/yutong/fast_datablob/v3/train"
+    data_dir_test = "/media/yutong/fast_datablob/v3/train"
 
-    # Xs, ys = Xs[:12000], ys[:12000]
-
-    rd = RawDataset(Xs, ys)
 
     batch_size = 1024
 
-    # data_dir = tempfile.mkdtemp()
 
-    data_dir = "/media/yutong/fast_datablob/v3"
+    if not os.path.exists(data_dir_train):
+
+        Xs, ys = load_hdf5_files([
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s02.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s03.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s04.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s05.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s06.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s07.h5",
+            "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
+        ])
+        # assert len(Xs) == len(ys)
+        # shuffle dataset
+        # perm = np.random.permutation(len(Xs))
+        Xs, ys = sklearn.utils.shuffle(Xs, ys)
+        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
+
+        rd_train = RawDataset(X_train, y_train)
+        rd_test  = RawDataset(X_test,  y_test)
+
+        try:
+            os.makedirs(data_dir_train, exist_ok=True)
+            os.makedirs(data_dir_test, exist_ok=True)
+        except Exception as e:
+            print("warning:", e)
+
+        fd_train = rd_train.featurize(batch_size, data_dir_train)
+        fd_test = rd_test.featurize(batch_size, data_dir_test)
+
+    else:
+
+        fd_train = FeaturizedDataset(data_dir_train)
+        fd_test = FeaturizedDataset(data_dir_test)
+
 
     # print("featurizing...")
-    # fd = rd.featurize(batch_size=batch_size, data_dir=data_dir)
+    # fd = rd_train.featurize(batch_size=batch_size, data_dir=data_dir)
     
+
+
     (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq), \
     (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq), \
     put_op = mnn_staging()
 
-    fd = FeaturizedDataset(data_dir)
 
     mnn = MoleculeNN(
         type_map=["H", "C", "N", "O"],
@@ -160,7 +190,7 @@ if __name__ == "__main__":
 
     def submitter():
         for _ in range(num_epochs):
-            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd.iterate(shuffle=True)):
+            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd_train.iterate(shuffle=True)):
 
                 # print(np.max(f0), f0)
                 # print(np.max(f1), f1)
@@ -190,12 +220,12 @@ if __name__ == "__main__":
     options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
     run_metadata = tf.RunMetadata()
     
-    print("num batches", fd.num_batches())
+    print("num batches", fd_train.num_batches())
 
     st = time.time()
     for e in range(num_epochs):
         print("epoch:", e)
-        for i in range(fd.num_batches()):
+        for i in range(fd_train.num_batches()):
             # print("running", i)
             # res = sess.run([train_op, loss_op])
             # res = sess.run([predict_op, train_op, loss_op])
@@ -207,6 +237,6 @@ if __name__ == "__main__":
 
     tot_time = time.time() - st # this logic is a little messed up
 
-    tpm = tot_time/(fd.num_batches()*batch_size*num_epochs)
+    tpm = tot_time/(fd_train.num_batches()*batch_size*num_epochs)
     print("Time Per Mol:", tpm, "seconds")
     print("Samples per minute:", 60/tpm)
