@@ -169,11 +169,14 @@ class FeaturizedDataset():
             print("WTF OM?", e)
 
     def num_batches(self):
-        path = os.path.join(self.data_dir, '*.npy')
-        return len(glob.glob(os.path.join(self.data_dir, '*.npy'))) // 7
-
+        try:
+            return self._nb
+        except AttributeError:
+            path = os.path.join(self.data_dir, '*.npy')
+            self._nb = len(glob.glob(os.path.join(self.data_dir, '*.npy'))) // 7
+            return self._nb
+        
     def write(self, s_idx, batched_feat_Xs, atom_type_idxs, mol_offsets, mol_ys):
-
 
         try:
             # save as a more efficient format for IO when training
@@ -219,7 +222,6 @@ class FeaturizedDataset():
 
             for o, f in zip(objs, fnames):
                 np.save(f, o, allow_pickle=False)
-
 
         except Exception as e:
             print("??", e)

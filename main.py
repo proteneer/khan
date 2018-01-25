@@ -93,31 +93,27 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
             for z in Z:
                 offset += atomizationEnergies[z]
 
-
             for k in range(len(E)):
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
                 y = E[k] - offset
-
-                # print(E[k], offset, y)
                 ys.append(y)
-
-                # print(np.expand_dims(Z, 1), R[k])
 
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
 
             # debug
-            if len(Xs) > 16000:
-                break
+            # if len(Xs) > 16000:
+                # break
 
     return Xs, ys
 
 if __name__ == "__main__":
 
     data_dir_train = "/media/yutong/fast_datablob/v3/train"
-    data_dir_test = "/media/yutong/fast_datablob/v3/train"
+    data_dir_test = "/media/yutong/fast_datablob/v3/test"
+    data_dir_gdb11 = "/media/yutong/fast_datablob/v3/gdb11"
 
 
     batch_size = 1024
@@ -132,42 +128,57 @@ if __name__ == "__main__":
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s04.h5",
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s05.h5",
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s06.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s07.h5",
-            "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
+            "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s07.h5",
+            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
         ])
-        # assert len(Xs) == len(ys)
+
         # shuffle dataset
-        # perm = np.random.permutation(len(Xs))
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
+
+        subsample_size = int(5e5)
+
+        assert subsample_size < len(Xs)
+
+        Xs, ys = Xs[:subsample_size], ys[:subsample_size]
+
+        # print(len(Xs), len(ys))
+
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
 
         rd_train = RawDataset(X_train, y_train)
         rd_test  = RawDataset(X_test,  y_test)
 
+        X_gdb11, y_gdb11 = load_hdf5_files([
+            "/home/yutong/roitberg_data/ANI-1_release/ani1_gdb10_ts.h5"
+        ])
+
+
+        rd_gdb11  = RawDataset(X_gdb11,  y_gdb11)
+
         try:
             os.makedirs(data_dir_train, exist_ok=True)
             os.makedirs(data_dir_test, exist_ok=True)
+            os.makedirs(data_dir_gdb11, exist_ok=True)
         except Exception as e:
             print("warning:", e)
 
+        # print("featurizing...")
         fd_train = rd_train.featurize(batch_size, data_dir_train)
         fd_test = rd_test.featurize(batch_size, data_dir_test)
+        fd_gdb11 = rd_gdb11.featurize(batch_size, data_dir_gdb11)
 
     else:
 
         fd_train = FeaturizedDataset(data_dir_train)
         fd_test = FeaturizedDataset(data_dir_test)
+        fd_gdb11 = FeaturizedDataset(data_dir_gdb11)
 
 
-    # print("featurizing...")
     # fd = rd_train.featurize(batch_size=batch_size, data_dir=data_dir)
     
-
-
     (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq), \
     (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq), \
     put_op = mnn_staging()
-
 
     mnn = MoleculeNN(
         type_map=["H", "C", "N", "O"],
@@ -176,7 +187,18 @@ if __name__ == "__main__":
         mol_idxs=mi_deq,
         layer_sizes=(384, 256, 128, 64, 1))
 
-    trainer = Trainer(mnn, yt_deq)
+    trainer = Trainer(
+        mnn,
+        yt_deq,
+        f0_enq,
+        f1_enq,
+        f2_enq,
+        f3_enq,
+        gi_enq,
+        mi_enq,
+        yt_enq,
+        put_op
+    )
     train_op_rmse = trainer.get_train_op_rmse()
     train_op_exp = trainer.get_train_op_exp()
     loss_op = trainer.get_loss_op()
@@ -186,57 +208,70 @@ if __name__ == "__main__":
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
 
-    num_epochs = 2048
-
-    def submitter():
-        for _ in range(num_epochs):
-            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(fd_train.iterate(shuffle=True)):
-
-                # print(np.max(f0), f0)
-                # print(np.max(f1), f1)
-                # print(np.max(f2), f2)
-                # print(np.max(f3), f3)
-
-                # assert 0
-
-                try:
-                    sess.run(put_op, feed_dict={
-                        f0_enq: f0,
-                        f1_enq: f1,
-                        f2_enq: f2,
-                        f3_enq: f3,
-                        gi_enq: gi,
-                        mi_enq: mi,
-                        yt_enq: yt,
-                    })
-                except Exception as e:
-                    print("OMG WTF BBQ", e)
-
-    executor = ThreadPoolExecutor(4)
-
-    executor.submit(submitter)
-
+    num_epochs = 1024
     tot_time = 0
-    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-    run_metadata = tf.RunMetadata()
     
     print("num batches", fd_train.num_batches())
 
     st = time.time()
+
     for e in range(num_epochs):
-        print("epoch:", e)
-        for i in range(fd_train.num_batches()):
-            # print("running", i)
-            # res = sess.run([train_op, loss_op])
-            # res = sess.run([predict_op, train_op, loss_op])
-            if e < 32:
-                res = sess.run([max_norm, trainer.rmse, train_op_rmse])
-            else:
-                res = sess.run([max_norm, trainer.exp_loss, train_op_exp])
-            print(res[1])
+
+        if e < 2:
+            train_ops = [trainer.rmse, train_op_rmse]
+        else:
+            train_ops = [trainer.rmse, train_op_rmse]
+            # train_ops = [trainer.exp_loss, train_op_exp]
+            # train_ops = [trainer.exp_loss, train_op_exp]
+
+        train_ops.extend(max_norm)
+
+        # print("TRAIN_OPS", train_ops)
+
+        train_losses = trainer.feed_dataset(sess, fd_train, shuffle=True, target_ops=train_ops)
+
+
+
+        l2_losses = [trainer.l2]
+
+        test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses)
+        global_rmse0 = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
+        # print("test rmse:", global_rmse0)
+
+        gdb11_l2s = trainer.feed_dataset(sess, fd_gdb11, shuffle=False, target_ops=l2_losses)
+        global_rmse1 = np.sqrt(np.mean(np.concatenate(gdb11_l2s).reshape((-1,))))
+        # print("gdb11 rmse:", global_rmse1)
+
+        print("test/gdb11 rmse", global_rmse0, global_rmse1)
+
+        # print("epoch:", e)
+
+        # for fd in [fd_train, fd_test, fd_gdb11]:
+        # avg_loss_train = 0
+        # for i in range(fd_train.num_batches()):
+        #     print("running", i)
+        #     # res = sess.run([train_op, loss_op])
+        #     # res = sess.run([predict_op, train_op, loss_op])
+        #     if e < 36 and idx :
+        #         res = sess.run([max_norm, trainer.rmse, train_op_rmse])
+        #     else:
+        #         res = sess.run([max_norm, trainer.exp_loss, train_op_exp])
+
+        #     avg_batch_rmse = np.mean([x[1] for x in res]) # this isn't strictly the same thing as global rmse
+        #     print("avg batch rmse:", avg_batch_rmse)
+        # avg_loss_train /= fd_train.num_batches()
+
+        # compute l2s
+        # test_l2s = []
+        # for i in range(fd_test.num_batches()):
+        #     res = sess.run([trainer.l2])
+        #     test_l2s.append()
+
+        #     l2s fd_test.num_batches()
+        # print(avg_loss_train)
 
     tot_time = time.time() - st # this logic is a little messed up
 
-    tpm = tot_time/(fd_train.num_batches()*batch_size*num_epochs)
+    tpm = tot_time/((fd_train.num_batches()+fd_test.num_batches()+fd_gdb11.num_batches())*batch_size*num_epochs)
     print("Time Per Mol:", tpm, "seconds")
     print("Samples per minute:", 60/tpm)

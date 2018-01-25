@@ -1,12 +1,27 @@
 import tensorflow as tf
 import khan
 
+
+from concurrent.futures import ThreadPoolExecutor
+
 class Trainer():
+
+    # Note: this is a pretty terrible class all in all. I'm ashamed of writing it
+    # but it gets the job done.
 
     def __init__(
         self,
         model, # atom type scatter idxs
-        labels):
+        labels,
+        f0_enq,
+        f1_enq,
+        f2_enq,
+        f3_enq,
+        gi_enq,
+        mi_enq,
+        yt_enq,
+        put_op,
+        ):
         """
         Model for full end-to-end.
         
@@ -33,6 +48,16 @@ class Trainer():
 
         self.max_norm_ops = max_norm_ops
 
+        self.f0_enq = f0_enq
+        self.f1_enq = f1_enq
+        self.f2_enq = f2_enq
+        self.f3_enq = f3_enq
+        self.gi_enq = gi_enq
+        self.mi_enq = mi_enq
+        self.yt_enq = yt_enq
+        self.put_op = put_op
+
+
     def weight_matrices(self):
         weights = []
         for ann in self.model.anns:
@@ -51,6 +76,40 @@ class Trainer():
 
     def get_loss_op(self):
         return self.exp_loss
+
+    def feed_dataset(self,
+        session,
+        dataset,
+        shuffle,
+        target_ops):
+
+        def submitter():
+            for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(dataset.iterate(shuffle=shuffle)):
+                # print("submitting...", b_idx)
+                try:
+                    session.run(self.put_op, feed_dict={
+                        self.f0_enq: f0,
+                        self.f1_enq: f1,
+                        self.f2_enq: f2,
+                        self.f3_enq: f3,
+                        self.gi_enq: gi,
+                        self.mi_enq: mi,
+                        self.yt_enq: yt,
+                    })
+                except Exception as e:
+                    print("EEEEE", e)
+
+        executor = ThreadPoolExecutor(4)
+        executor.submit(submitter)
+
+        results = []
+
+        for i in range(dataset.num_batches()):
+            # print("running...")
+            results.append(session.run(target_ops))
+            # print(res)
+
+        return results
 
     # def get_atm(self)
 
