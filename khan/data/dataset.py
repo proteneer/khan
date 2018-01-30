@@ -73,49 +73,49 @@ class RawDataset():
             symmetrizer = Symmetrizer()
 
         feat_op = symmetrizer.featurize_batch(get_op[0], get_op[1])
-        session = tf.Session()
 
-        all_ais = [] # batches of atom type offsets
-        all_xos = [] # batches of mol offsets lists
-        all_ys = [] 
+        with tf.Session() as session:
 
-        def submitter():
-            for b_idx, (x_b, x_o, yy) in enumerate(self.iterate(batch_size)):
-                session.run(put_op, feed_dict={
-                    x_b_enq: x_b,
-                    x_o_enq: x_o
-                })
-                all_ais.append(x_b[:, 0])
-                all_xos.append(x_o)
-                all_ys.append(yy)
+            all_ais = [] # batches of atom type offsets
+            all_xos = [] # batches of mol offsets lists
+            all_ys = [] 
 
-        q = queue.Queue()
+            def submitter():
+                for b_idx, (x_b, x_o, yy) in enumerate(self.iterate(batch_size)):
+                    session.run(put_op, feed_dict={
+                        x_b_enq: x_b,
+                        x_o_enq: x_o
+                    })
+                    all_ais.append(x_b[:, 0])
+                    all_xos.append(x_o)
+                    all_ys.append(yy)
 
-        def writer():
-            fd = FeaturizedDataset(data_dir)
-            for s_idx in range(self.num_batches(batch_size)):
-                print("writing...", s_idx)
-                feat_data = q.get()
-                ai, xo, xy = all_ais[s_idx], all_xos[s_idx], all_ys[s_idx]
-                all_ais[s_idx] = None
-                all_xos[s_idx] = None # clear memory
-                all_ys[s_idx] = None # clear memory
+            q = queue.Queue()
 
-                fd.write(s_idx, feat_data, ai, xo, xy)
+            def writer():
+                fd = FeaturizedDataset(data_dir)
+                for s_idx in range(self.num_batches(batch_size)):
+                    print("writing...", s_idx)
+                    feat_data = q.get()
+                    ai, xo, xy = all_ais[s_idx], all_xos[s_idx], all_ys[s_idx]
+                    all_ais[s_idx] = None
+                    all_xos[s_idx] = None # clear memory
+                    all_ys[s_idx] = None # clear memory
+
+                    fd.write(s_idx, feat_data, ai, xo, xy)
+                return fd
+
+            executor = ThreadPoolExecutor(2)
+            submit_future = executor.submit(submitter)
+            write_future = executor.submit(writer)
+
+            for _ in range(self.num_batches(batch_size)):
+                q.put(session.run(feat_op))
+
+            submit_future.result()
+            fd = write_future.result()
+
             return fd
-
-        executor = ThreadPoolExecutor(2)
-        submit_future = executor.submit(submitter)
-        write_future = executor.submit(writer)
-
-        for _ in range(self.num_batches(batch_size)):
-            q.put(session.run(feat_op))
-
-        submit_future.result()
-        fd = write_future.result()
-
-        session.close()
-        return fd
 
 def generate_fnames(data_dir, s_idx):
     return [

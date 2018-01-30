@@ -33,18 +33,29 @@ class Trainer():
         # float64 is for numerical stability
 
         self.exp_loss = tf.exp(tf.cast(self.rmse, dtype=tf.float64))
-        self.optimizer_rmse = tf.train.AdamOptimizer() # change defaults
-        # todo: add a step for max normalization
-        self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse)
-        self.optimizer_exp = tf.train.AdamOptimizer() # change defaults
-        self.train_op_exp = self.optimizer_exp.minimize(self.exp_loss)
+        self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
+        # b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer)
+        self.learning_rate = tf.get_variable("learning_rate", tuple(), tf.float32, tf.constant_initializer(0.001), trainable=False)
+        # self.optimizer_rmse = tf.train.AdamOptimizer(
+        #     learning_rate=self.learning_rate,
+        #     beta1=0.9,
+        #     beta2=0.999,
+        #     epsilon=1e-8) # change defaults
+        # # todo: add a step for max normalization
+        # self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse)
+        self.optimizer_exp = tf.train.AdamOptimizer(
+            learning_rate=self.learning_rate,
+            beta1=0.9,
+            beta2=0.999,
+            epsilon=1e-8) # change defaults
+        self.train_op_exp = self.optimizer_exp.minimize(self.exp_loss, global_step=self.global_step)
 
         # maxnorm
         ws = self.weight_matrices()
         max_norm_ops = []
 
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
 
         self.max_norm_ops = max_norm_ops
 
@@ -64,6 +75,13 @@ class Trainer():
             for W in ann.Ws:
                 weights.append(W)
         return weights
+
+    def biases(self):
+        biases = []
+        for ann in self.model.anns:
+            for b in ann.bs:
+                biases.append(b)
+        return biases
 
     def get_maxnorm_ops(self):
         return self.max_norm_ops
