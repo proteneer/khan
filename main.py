@@ -16,6 +16,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 HARTREE_TO_KCAL_PER_MOL = 627.509
 
+atomizationEnergiesWB97 = np.array([
+    -0.500607632585,
+    -37.8302333826,
+    -54.5680045287,
+    -75.0362229210], dtype=np.float32)
+
+atomizationEnergiesMO62x = np.array([
+   -0.498135,
+   -37.841399,
+   -54.586413,
+   -75.062826,
+], dtype=np.float32)
+
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
   res = []
@@ -23,7 +36,68 @@ def convert_species_to_atomic_nums(s):
     res.append(PERIODIC_TABLE[k])
   return np.array(res, dtype=np.int32)
 
-def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
+
+def load_calibration_file(calibration_file):
+    with open(calibration_file, 'r') as fh:
+        # results = []
+        # for _ in range(9):
+            # results.append([])
+
+        mapping = {}
+
+        for line in fh.readlines():
+            parts = line.split()
+            path = parts[0].split(".")[0]
+            energy = parts[-1]
+            mapping[path] = float(energy)
+
+        return mapping
+
+def parse_xyz(xyz_file):
+    with open(xyz_file, "r") as fh:
+        header = fh.readline()
+        comment = fh.readline()
+        y = float(comment.split()[-1])
+        body = fh.readlines()
+        elems = []
+        coords = []
+        for line in body:
+            res = line.split()
+            elem = res[0]
+            x = float(res[1])
+            y = float(res[2])
+            z = float(res[3])
+            elems.append(elem)
+            coords.append((x,y,z))
+        Z = convert_species_to_atomic_nums(elems)
+        R = np.array(coords, dtype=np.float32)
+        X = np.concatenate([np.expand_dims(Z, 1), R], axis=1)
+        # print(X)
+        # assert 0
+        return X, y
+
+def load_ff_files(ff_dir):
+    Xs = []
+    ys = []
+    for root, dirs, files in os.walk(ff_dir):
+        for filename in files:
+            rootname, extension = os.path.splitext(filename)
+            if extension == ".xyz":
+                filepath = os.path.join(root, filename)
+                X, y = parse_xyz(filepath)
+                Xs.append(X)
+                ys.append(y)
+            else:
+                print("Unknown filetype:", filename)
+    print(len(Xs), len(ys))
+    return Xs, ys
+
+
+def load_hdf5_files(
+    hdf5files,
+    calibration_map=None,
+    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL
+):
     """
     Load the ANI dataset.
 
@@ -33,28 +107,6 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
         List of paths to hdf5 files that will be used to generate the dataset. The data should be
         in the format used by the ANI-1 dataset.
 
-    batch_size: int
-        Used to determined the shard_size, where shard_size is batch_size * 4096
-
-    data_dir: str
-        Directory in which we save the resulting data
-
-    mode: str
-        Accepted modes are "relative", "atomization", or "absolute". These settings are used
-        to adjust the dynamic range of the model, with absolute having the greatest and relative
-        having the lowest. Note that for atomization we approximate the single atom energy
-        using a different level of theory
-
-    max_atoms: int
-        Total number of atoms we allow for.
-
-    energy_cutoff: int or None
-        A cutoff to use for pruning high energy conformations from a dataset. Units are in
-        hartrees. Default is set to 100 kcal/mol or ~0.16 hartrees.
-
-    selection_size: int or None
-        Subsample of conformations that we want to choose from gdb-8
-
     Returns
     -------
     Dataset, list of int
@@ -63,11 +115,7 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
 
     """
 
-    atomizationEnergies = np.array([
-        -0.500607632585,
-        -37.8302333826,
-        -54.5680045287,
-        -75.0362229210], dtype=np.float32)
+
 
     Xs = []
     ys = []
@@ -85,31 +133,46 @@ def load_hdf5_files(hdf5files, energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
 
             print("Processing: ", P)
 
+            path = P.split("/")[-1]
+
             Z = convert_species_to_atomic_nums(S)
             minimum = np.amin(E)
 
-            offset = 0
+            wb97offset = 0
+            mo62xoffset = 0
 
             for z in Z:
-                offset += atomizationEnergies[z]
+                wb97offset += atomizationEnergiesWB97[z]
+                mo62xoffset += atomizationEnergiesMO62x[z]
+
+            calibration_offset = 0
+
+            if calibration_map:
+                min_atomization_wb97 = minimum - wb97offset
+                min_atomization_mo62x = minimum - mo62xoffset
+                calibration_offset = min_atomization_mo62x - min_atomization_wb97
 
             for k in range(len(E)):
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
-                y = E[k] - offset
+                y = E[k] - wb97offset + calibration_offset
                 ys.append(y)
-
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
 
-            # debug
-            # if len(Xs) > 16000:
-                # break
-
     return Xs, ys
 
+
+
+
 if __name__ == "__main__":
+    ff_train_Xs, ff_train_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/train')
+    ff_test_Xs, ff_test_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/test')
+
+    assert 0 
+
+    cal_map = load_calibration_file("/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt")
 
     data_dir_train = "/media/yutong/nvme_ssd/v3/train"
     data_dir_test = "/media/yutong/nvme_ssd/v3/test"
@@ -130,10 +193,13 @@ if __name__ == "__main__":
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s06.h5",
             "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s07.h5",
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
-        ])
+        ], calibration_map=cal_map)
 
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
+
+        # Xs.extend() # add training data here
+        # ys.extend()
 
         subsample_size = int(1e6)
 
@@ -151,7 +217,6 @@ if __name__ == "__main__":
         X_gdb11, y_gdb11 = load_hdf5_files([
             "/home/yutong/roitberg_data/ANI-1_release/ani1_gdb10_ts.h5"
         ])
-
 
         rd_gdb11  = RawDataset(X_gdb11,  y_gdb11)
 
@@ -230,89 +295,38 @@ if __name__ == "__main__":
     else:
         sess.run(tf.global_variables_initializer())
         print("Pre-minimizing one epoch with rmse loss...")
-        # train_ops = [trainer.rmse, train_op_rmse]
-        # train_ops.extend(max_norm_ops)
-        # train_losses = trainer.feed_dataset(sess, fd_train, shuffle=True, target_ops=train_ops)
-
     num_epochs = 2
     tot_time = 0
     
     print("num batches", fd_train.num_batches())
 
     st = time.time()
-
-    # l2_losses = [trainer.l2, trainer.model.predict_op()]
-
+ 
     l2_losses = [trainer.l2]
 
     test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses)
-    
-    # print("????", test_l2s[0][1])
-
-    # for a in test_l2s:
-    #     for b in a[0]:
-    #         if not np.isfinite(b):
-    #             print("!!!!", b)
-
-
-
-
+ 
     best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
-
-    print("BEST_TEST_SCORE", best_test_score)
-
-    # assert 0
 
     local_epoch_count = 0 # epochs within a learning rate
     max_local_epoch_count = 50 
-    
-    # max_local_epoch_count = "test rmse", test_r "gdb11 rmse", 0
-    # global_epoch_count = 0
 
-    # use global step?
-
-    # train_ops = [trainer.exp_loss, train_op_exp, trainer.global_step]
     train_ops = [trainer.global_step, trainer.learning_rate, trainer.rmse, train_op_exp]
-    # train_ops.extend(max_norm)
-
-    # print("INITIAL WEIGHTS", sess.run(trainer.weight_matrices()))
-    # print("initial biases", sess.run(trainer.biases()))
-    # assert 0
 
     for lr in [1e-3, 1e-4, 1e-5, 1e-6]:
     # for lr in [1e-4, 1e-5]:
 
         print("setting learning rate to", lr)
         sess.run(tf.assign(trainer.learning_rate, lr))
-
-        # print("WTF???", sess.run([trainer.learning_rate]))
-        # assert 0
-
-        # for e in range(num_epochs):
         while local_epoch_count < max_local_epoch_count:
 
-            sess.run(max_norm_ops) # extraneous, do once at the beginning
+            # sess.run(max_norm_ops) # extraneous, do once at the beginning
             train_results = trainer.feed_dataset(sess, fd_train, shuffle=True, target_ops=train_ops)
             sess.run(max_norm_ops)
 
             global_epoch = train_results[0][0] // fd_train.num_batches()
 
-            # print("RMSE DEBUG", train_results[0][2])
-
-            # print(train_results[0][0])
-            # global_rmse_T = np.sqrt(np.mean(np.concatenate([x[0] for x in train_losses]).reshape((-1,))))
-
             test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses)
-
-            # print("L2 MEAN, MODEL PREDS", np.mean(np.concatenate(test_l2s)), test_l2s)
-
-            # for r_idx, r in enumerate(test_l2s):
-            #     if not np.isfinite(r).all():
-            #         print("WEIGHTS", sess.run(trainer.weight_matrices()))
-            #         print("biases", sess.run(trainer.biases()))
-            #         assert 0
-
-            #         print(r_idx, r)
 
             test_rmse = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
 
@@ -327,9 +341,8 @@ if __name__ == "__main__":
                       "| l-epo:", local_epoch_count, \
                       "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse)
 
-                # print("gdb11 rmse", gdb11_rmse)
-
                 local_epoch_count = 0
+                best_test_score = test_rmse
             else:
 
                 print("Worse g-epo:", global_epoch, "| lr:", lr, \

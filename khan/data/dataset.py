@@ -134,7 +134,6 @@ class FeaturizedDataset():
         self.data_dir = data_dir
 
     def iterate(self, shuffle=False):
-        # path = os.path.join(self.data_dir, '*.npz')
         n_shards = self.num_batches()
 
         try:
