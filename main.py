@@ -29,6 +29,7 @@ atomizationEnergiesMO62x = np.array([
    -75.062826,
 ], dtype=np.float32)
 
+
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
   res = []
@@ -55,25 +56,38 @@ def load_calibration_file(calibration_file):
 
 def parse_xyz(xyz_file):
     with open(xyz_file, "r") as fh:
+
         header = fh.readline()
         comment = fh.readline()
+
         y = float(comment.split()[-1])
         body = fh.readlines()
         elems = []
         coords = []
+
         for line in body:
             res = line.split()
             elem = res[0]
-            x = float(res[1])
-            y = float(res[2])
-            z = float(res[3])
             elems.append(elem)
-            coords.append((x,y,z))
+            coords.append((float(res[1]),float(res[2]),float(res[3])))
+
         Z = convert_species_to_atomic_nums(elems)
+
+        mo62xoffset = 0
+
+        for z in Z:
+            mo62xoffset += atomizationEnergiesMO62x[z]
+
+
+        # print(xyz_file, "Y", y, mo62xoffset)
+
+        y = y - mo62xoffset
+        # print(y)
+
         R = np.array(coords, dtype=np.float32)
         X = np.concatenate([np.expand_dims(Z, 1), R], axis=1)
-        # print(X)
-        # assert 0
+
+
         return X, y
 
 def load_ff_files(ff_dir):
@@ -167,22 +181,24 @@ def load_hdf5_files(
 
 
 if __name__ == "__main__":
-    ff_train_Xs, ff_train_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/train')
-    ff_test_Xs, ff_test_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/test')
-
-    assert 0 
-
-    cal_map = load_calibration_file("/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt")
 
     data_dir_train = "/media/yutong/nvme_ssd/v3/train"
     data_dir_test = "/media/yutong/nvme_ssd/v3/test"
     data_dir_gdb11 = "/media/yutong/nvme_ssd/v3/gdb11"
+    data_dir_fftest = "/media/yutong/nvme_ssd/v3/fftest"
 
 
     batch_size = 1024
 
 
     if not os.path.exists(data_dir_train):
+
+        ff_train_Xs, ff_train_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/train')
+        ff_test_Xs, ff_test_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/test')
+
+        # assert 0 
+
+        cal_map = load_calibration_file("/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt")
 
         Xs, ys = load_hdf5_files([
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
@@ -195,19 +211,20 @@ if __name__ == "__main__":
             # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
         ], calibration_map=cal_map)
 
+        Xs.extend(ff_train_Xs) # add training data here
+        ys.extend(ff_train_ys)
+
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
 
-        # Xs.extend() # add training data here
-        # ys.extend()
-
         subsample_size = int(1e6)
+
 
         assert subsample_size < len(Xs)
 
         Xs, ys = Xs[:subsample_size], ys[:subsample_size]
 
-        # print(len(Xs), len(ys))
+        print("lengths", len(Xs), len(ys))
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
 
@@ -218,12 +235,14 @@ if __name__ == "__main__":
             "/home/yutong/roitberg_data/ANI-1_release/ani1_gdb10_ts.h5"
         ])
 
-        rd_gdb11  = RawDataset(X_gdb11,  y_gdb11)
+        rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
+        rd_fftest  = RawDataset(ff_test_Xs, ff_test_ys)
 
         try:
             os.makedirs(data_dir_train, exist_ok=True)
             os.makedirs(data_dir_test, exist_ok=True)
             os.makedirs(data_dir_gdb11, exist_ok=True)
+            os.makedirs(data_dir_fftest, exist_ok=True)
         except Exception as e:
             print("warning:", e)
 
@@ -231,12 +250,15 @@ if __name__ == "__main__":
         fd_train = rd_train.featurize(batch_size, data_dir_train)
         fd_test = rd_test.featurize(batch_size, data_dir_test)
         fd_gdb11 = rd_gdb11.featurize(batch_size, data_dir_gdb11)
+        print("!")
+        fd_fftest = rd_fftest.featurize(batch_size, data_dir_fftest)
 
     else:
 
         fd_train = FeaturizedDataset(data_dir_train)
         fd_test = FeaturizedDataset(data_dir_test)
         fd_gdb11 = FeaturizedDataset(data_dir_gdb11)
+        fd_fftest = FeaturizedDataset(data_dir_fftest)
 
 
     # fd = rd_train.featurize(batch_size=batch_size, data_dir=data_dir)
@@ -294,7 +316,7 @@ if __name__ == "__main__":
 
     else:
         sess.run(tf.global_variables_initializer())
-        print("Pre-minimizing one epoch with rmse loss...")
+        # print("Pre-minimizing one epoch with rmse loss...")
     num_epochs = 2
     tot_time = 0
     
@@ -337,9 +359,12 @@ if __name__ == "__main__":
                 gdb11_l2s = trainer.feed_dataset(sess, fd_gdb11, shuffle=False, target_ops=l2_losses)
                 gdb11_rmse = np.sqrt(np.mean(np.concatenate(gdb11_l2s).reshape((-1,))))
 
+                fftest_l2s = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=l2_losses)
+                fftest_rmse = np.sqrt(np.mean(np.concatenate(fftest_l2s).reshape((-1,))))
+
                 print("Better g-epo:", global_epoch, "| lr:", lr, \
                       "| l-epo:", local_epoch_count, \
-                      "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse)
+                      "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse, "| fftest rmse:", fftest_rmse)
 
                 local_epoch_count = 0
                 best_test_score = test_rmse
