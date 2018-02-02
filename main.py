@@ -29,6 +29,20 @@ atomizationEnergiesMO62x = np.array([
    -75.062826,
 ], dtype=np.float32)
 
+atomizationEnergiesJS18 = np.array([
+    -379.47160374/HARTREE_TO_KCAL_PER_MOL,
+    -23887.88837703/HARTREE_TO_KCAL_PER_MOL,
+    -34328.09841337/HARTREE_TO_KCAL_PER_MOL,
+    -47175.24402322/HARTREE_TO_KCAL_PER_MOL,
+])
+
+CALIBRATION_FILE = "/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt"
+
+ROITBERG_ANI_DIR = "/home/yutong/roitberg_data/ANI-1_release"
+ROTAMER_TRAIN_DIR = "/home/yutong/roitberg_data/ANI-1_release/rotamers/train"
+ROTAMER_TEST_DIR = "/home/yutong/roitberg_data/ANI-1_release/rotamers/test"
+
+WORK_DIR = "/media/yutong/nvme_ssd/v3/" # put this on a fast SSD with 1 TB of data
 
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
@@ -40,9 +54,6 @@ def convert_species_to_atomic_nums(s):
 
 def load_calibration_file(calibration_file):
     with open(calibration_file, 'r') as fh:
-        # results = []
-        # for _ in range(9):
-            # results.append([])
 
         mapping = {}
 
@@ -73,15 +84,18 @@ def parse_xyz(xyz_file):
 
         Z = convert_species_to_atomic_nums(elems)
 
+        wb97offset = 0
         mo62xoffset = 0
+        js18offset = 0 
 
         for z in Z:
+            wb97offset += atomizationEnergiesWB97[z]
             mo62xoffset += atomizationEnergiesMO62x[z]
-
-
+            js18offset += atomizationEnergiesJS18[z]
         # print(xyz_file, "Y", y, mo62xoffset)
 
-        y = y - mo62xoffset
+        y = y - js18offset
+        # y = y - mo62xoffset
         # print(y)
 
         R = np.array(coords, dtype=np.float32)
@@ -134,6 +148,8 @@ def load_hdf5_files(
     Xs = []
     ys = []
 
+    print("Loading...")
+
     for hdf5file in hdf5files:
         adl = pya.anidataloader(hdf5file)
         for data in adl:
@@ -154,26 +170,40 @@ def load_hdf5_files(
 
             wb97offset = 0
             mo62xoffset = 0
+            js18offset = 0 
 
             for z in Z:
                 wb97offset += atomizationEnergiesWB97[z]
                 mo62xoffset += atomizationEnergiesMO62x[z]
+                js18offset += atomizationEnergiesJS18[z]
 
             calibration_offset = 0
 
+            # temporarily disable
+            # if calibration_map:
+            #     min_atomization_wb97 = minimum - wb97offset
+            #     min_atomization_mo62x = calibration_map[path] - mo62xoffset
+            #     calibration_offset = min_atomization_mo62x - min_atomization_wb97
+
             if calibration_map:
-                min_atomization_wb97 = minimum - wb97offset
-                min_atomization_mo62x = minimum - mo62xoffset
-                calibration_offset = min_atomization_mo62x - min_atomization_wb97
+                calibration_offset = calibration_map[path] - minimum 
 
             for k in range(len(E)):
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
-                y = E[k] - wb97offset + calibration_offset
+                y = E[k] - js18offset + calibration_offset
+
+                # y = E[k] - wb97offset + calibration_offset
                 ys.append(y)
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
+
+    # import matplotlib.mlab as mlab
+    # import matplotlib.pyplot as plt
+
+    # n, bins, patches = plt.hist(ys, 100, facecolor='green', alpha=0.75)
+    # plt.show()
 
     return Xs, ys
 
@@ -182,34 +212,38 @@ def load_hdf5_files(
 
 if __name__ == "__main__":
 
-    data_dir_train = "/media/yutong/nvme_ssd/v3/train"
-    data_dir_test = "/media/yutong/nvme_ssd/v3/test"
-    data_dir_gdb11 = "/media/yutong/nvme_ssd/v3/gdb11"
-    data_dir_fftest = "/media/yutong/nvme_ssd/v3/fftest"
-
-
     batch_size = 1024
 
+    save_dir = os.path.join(WORK_DIR, "save")
+    data_dir_train = os.path.join(WORK_DIR, "train")
+    data_dir_test = os.path.join(WORK_DIR, "test")
+    data_dir_gdb11 = os.path.join(WORK_DIR, "gdb11")
+    data_dir_fftest = os.path.join(WORK_DIR, "fftest")
 
     if not os.path.exists(data_dir_train):
 
-        ff_train_Xs, ff_train_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/train')
-        ff_test_Xs, ff_test_ys = load_ff_files('/home/yutong/roitberg_data/ANI-1_release/rotamers/test')
 
         # assert 0 
 
-        cal_map = load_calibration_file("/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt")
+        cal_map = load_calibration_file(CALIBRATION_FILE)
 
         Xs, ys = load_hdf5_files([
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s01.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s02.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s03.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s04.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s05.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s06.h5",
-            "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s07.h5",
-            # "/home/yutong/roitberg_data/ANI-1_release/ani_gdb_s08.h5",
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s01.h5"),
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s02.h5"),
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s03.h5"),
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s04.h5"),
+            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s05.h5"),
+            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s06.h5"),
+            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s07.h5"),
+            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s08.h5"),
         ], calibration_map=cal_map)
+
+        print("Loading ff training data...")
+        ff_train_Xs, ff_train_ys = load_ff_files(ROTAMER_TRAIN_DIR)
+
+        print("Loading ff testing data...")
+        ff_test_Xs, ff_test_ys = load_ff_files(ROTAMER_TEST_DIR)
+
 
         Xs.extend(ff_train_Xs) # add training data here
         ys.extend(ff_train_ys)
@@ -217,10 +251,10 @@ if __name__ == "__main__":
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
 
-        subsample_size = int(1e6)
+        subsample_size = int(2e5)
+        # subsample_size = len(Xs)
 
-
-        assert subsample_size < len(Xs)
+        assert subsample_size <= len(Xs)
 
         Xs, ys = Xs[:subsample_size], ys[:subsample_size]
 
@@ -232,7 +266,7 @@ if __name__ == "__main__":
         rd_test  = RawDataset(X_test,  y_test)
 
         X_gdb11, y_gdb11 = load_hdf5_files([
-            "/home/yutong/roitberg_data/ANI-1_release/ani1_gdb10_ts.h5"
+            os.path.join(ROITBERG_ANI_DIR, "ani1_gdb10_ts.h5"),
         ])
 
         rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
@@ -250,7 +284,6 @@ if __name__ == "__main__":
         fd_train = rd_train.featurize(batch_size, data_dir_train)
         fd_test = rd_test.featurize(batch_size, data_dir_test)
         fd_gdb11 = rd_gdb11.featurize(batch_size, data_dir_gdb11)
-        print("!")
         fd_fftest = rd_fftest.featurize(batch_size, data_dir_fftest)
 
     else:
@@ -296,8 +329,7 @@ if __name__ == "__main__":
     # saver = tf.train.Saver(tf.trainable_variables())
     saver = tf.train.Saver()
 
-    save_dir = "/media/yutong/nvme_ssd/v3/save"
-    # save_dir = "./tmp_save"
+
     save_prefix = "ani"
     save_path = os.path.join(save_dir, save_prefix)
     if os.path.exists(save_dir):
@@ -335,7 +367,7 @@ if __name__ == "__main__":
 
     train_ops = [trainer.global_step, trainer.learning_rate, trainer.rmse, train_op_exp]
 
-    for lr in [1e-3, 1e-4, 1e-5, 1e-6]:
+    for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
     # for lr in [1e-4, 1e-5]:
 
         print("setting learning rate to", lr)
@@ -375,41 +407,6 @@ if __name__ == "__main__":
                       "| test rmse:", test_rmse)
                 local_epoch_count += 1
 
-
-
-
-            # global_epoch_count += 1
-
-            # print("train/test/gdb11 rmse", global_rmse_T, global_rmse0, global_rmse1)
-
-
-
-
-        # print("epoch:", e)
-
-        # for fd in [fd_train, fd_test, fd_gdb11]:
-        # avg_loss_train = 0
-        # for i in range(fd_train.num_batches()):
-        #     print("running", i)
-        #     # res = sess.run([train_op, loss_op])
-        #     # res = sess.run([predict_op, train_op, loss_op])
-        #     if e < 36 and idx :
-        #         res = sess.run([max_norm, trainer.rmse, train_op_rmse])
-        #     else:
-        #         res = sess.run([max_norm, trainer.exp_loss, train_op_exp])
-
-        #     avg_batch_rmse = np.mean([x[1] for x in res]) # this isn't strictly the same thing as global rmse
-        #     print("avg batch rmse:", avg_batch_rmse)
-        # avg_loss_train /= fd_train.num_batches()
-
-        # compute l2s
-        # test_l2s = []
-        # for i in range(fd_test.num_batches()):
-        #     res = sess.run([trainer.l2])
-        #     test_l2s.append()
-
-        #     l2s fd_test.num_batches()
-        # print(avg_loss_train)
 
     tot_time = time.time() - st # this logic is a little messed up
 
