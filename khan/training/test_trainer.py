@@ -7,6 +7,7 @@ import time
 import tensorflow as tf
 import unittest
 
+from khan.model.symmetrizer import Symmetrizer
 from khan.model.nn import MoleculeNN
 from khan.training.trainer import Trainer
 
@@ -27,7 +28,7 @@ class TestTrainer(unittest.TestCase):
     def tearDown(self):
         self.sess.close()
 
-    def test_benchmark(self):
+    def test_benchmark_precomputed(self):
 
         batch_size = 1024
 
@@ -64,7 +65,7 @@ class TestTrainer(unittest.TestCase):
             layer_sizes=(feat_size, 256, 128, 64, 1))
 
         trainer = Trainer(mnn, yt)
-        results_all = trainer.train()
+        results_all = trainer.get_train_op()
 
         self.sess.run(tf.global_variables_initializer())
 
@@ -74,12 +75,6 @@ class TestTrainer(unittest.TestCase):
         def submitter():
             tot_time = 0
 
-            # mol_feats = []
-            # mol_offsets = []
-            # last_idx = len(mol_feats)
-
-            # print("foo!!")
-
             mol_idxs = []
             mol_feats = []
             atom_types = []
@@ -88,7 +83,7 @@ class TestTrainer(unittest.TestCase):
             global_idx = 0
 
             for mol_idx in range(batch_size):
-                num_atoms = np.random.randint(22,23)
+                num_atoms = np.random.randint(16, 17)
 
                 for i in range(num_atoms):
                     mol_feats.append(np.random.rand(feat_size))
@@ -112,14 +107,7 @@ class TestTrainer(unittest.TestCase):
 
             mol_yy = np.random.rand(batch_size)
 
-            print("MOL_FEATS_SHAPE", mol_feats.shape)
-
             for i in range(batches_per_thread):
-                print("submitting", i)
-
-                # print(t0, t1, t2, t3, gather_idxs, mol_idxs, mol_yy)
-
-                st = time.time()
                 self.sess.run(put_op, feed_dict={
                     f0_enq: t0,
                     f1_enq: t1,
@@ -129,8 +117,6 @@ class TestTrainer(unittest.TestCase):
                     mi_enq: mol_idxs,
                     yt_enq: mol_yy,
                 })
-                # tot_time += delta - st
-
 
             return tot_time
 
@@ -140,12 +126,7 @@ class TestTrainer(unittest.TestCase):
         for p in range(n_threads):
             executor.submit(submitter)
 
-
-
-
-        # def runner():
         tot_time = 0
-
         options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
         run_metadata = tf.RunMetadata()
 
@@ -155,7 +136,7 @@ class TestTrainer(unittest.TestCase):
 
             # this needs to transfer data back, but in practice we just compute
             # a loss and call it a day
-            # if i == 0:
+            # if i < 10:
             if True:
                 print("waiting...")
                 self.sess.run(results_all)
