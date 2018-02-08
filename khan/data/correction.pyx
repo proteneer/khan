@@ -134,7 +134,7 @@ def generateBasis(
     cdef float b3 = 0 
     cdef float b4 = 0 
 
-    cdef int condensed_idx = 0
+    cdef int condensed_idx = -1
 
     cdef double E_pair = 0
     cdef float energy = 0
@@ -172,9 +172,51 @@ def generateBasis(
             b_i = inner_i_A + 1
             b_j = inner_j_A + 1
 
-            condensed_idx = b_i*4 + b_j - b_i*(b_i+1)/2 - b_i - 1
+
+            if inner_i_A == 0:
+                if inner_j_A == 0:
+                    condensed_idx = 0
+                elif inner_j_A == 1:
+                    condensed_idx = 1
+                elif inner_j_A == 2:
+                    condensed_idx = 2
+                elif inner_j_A == 3:
+                    condensed_idx = 3
+            elif inner_i_A == 1:
+                if inner_j_A == 0:
+                    condensed_idx = 1
+                elif inner_j_A == 1:
+                    condensed_idx = 4
+                elif inner_j_A == 2:
+                    condensed_idx = 5
+                elif inner_j_A == 3:
+                    condensed_idx = 6
+            elif inner_i_A == 2:
+                if inner_j_A == 0:
+                    condensed_idx = 2
+                elif inner_j_A == 1:
+                    condensed_idx = 5
+                elif inner_j_A == 2:
+                    condensed_idx = 7
+                elif inner_j_A == 3:
+                    condensed_idx = 8
+            elif inner_i_A == 3:
+                if inner_j_A == 0:
+                    condensed_idx = 3
+                elif inner_j_A == 1:
+                    condensed_idx = 6
+                elif inner_j_A == 2:
+                    condensed_idx = 8
+                elif inner_j_A == 3:
+                    condensed_idx = 9
+
+            if condensed_idx == -1:
+                print(inner_i_A, inner_j_A, condensed_idx)
+                assert 0
+
+            # condensed_idx = b_i*4 + b_j - b_i*(b_i+1)/2 - b_i - 1
             
-            print(inner_i_A, inner_j_A, condensed_idx)
+            # print(inner_i_A, inner_j_A, condensed_idx)
             # print("????", condensed_idx)
 
             # print(0*n_params + condensed_idx)
@@ -187,6 +229,6 @@ def generateBasis(
             bases[2*n_params + condensed_idx] += b3
             bases[3*n_params + condensed_idx] += b4
 
-    assert 0
+    # assert 0
 
     return bases

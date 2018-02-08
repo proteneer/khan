@@ -205,6 +205,8 @@ def load_hdf5_files(
                 # print(y)
 
                 # y = E[k] - wb97offset + calibration_offset
+                #     wb97     fitted on wb97        m062x_offset
+                # y = E[k] - customJamesSelfIxn + calibration_offset
                 ys.append(y)
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
