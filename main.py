@@ -44,6 +44,70 @@ ROTAMER_TEST_DIR = "/home/yutong/roitberg_data/ANI-1_release/rotamers/test"
 
 WORK_DIR = "/media/yutong/nvme_ssd/v3/" # put this on a fast SSD with 1 TB of data
 
+params_list = [ -3.61495025e+02,  -2.38566440e+04,  -3.43234157e+04,
+        -4.71784651e+04,  -1.35927769e+02,  -1.74835391e+02,
+        -2.66558100e+02,   2.36476049e+01,   1.00037527e+02,
+         1.27547041e+01,   1.72507376e+02,  -7.21578715e+01,
+        -2.77910695e+02,   2.10919757e+03,   2.79778489e+03,
+         3.47283119e+03,   3.22775414e+02,   4.65919734e+02,
+         2.06357637e+03,   1.51680516e+03,   2.66909212e+03,
+         3.29117774e+03,  -6.80491343e+03,  -8.27595549e+03,
+        -9.40328190e+03,  -3.46198683e+03,  -4.85364601e+03,
+        -1.00000000e+04,  -9.99999939e+03,  -9.99934500e+03,
+        -1.37665219e+03,   5.88608669e+03,   6.60117401e+03,
+         7.06803912e+03,   5.16847643e+03,   6.35979202e+03,
+         1.11347193e+04,   1.26617984e+04,   1.03047549e+04,
+         1.68165667e+02] # from 1.2M run
+
+n_atom_types = 4
+
+pair_indices = {
+    ('H','C'):0,
+    ('H','N'):1,
+    ('H','O'):2,
+    ('C','C'):3,
+    ('C','N'):4,
+    ('C','O'):5,
+    ('N','N'):6,
+    ('N','O'):7,
+    ('O','O'):8
+}
+
+n_pairs = len(pair_indices)
+
+pair_indices = {
+    **pair_indices,
+    ('C','H'):0,
+    ('N','H'):1,
+    ('O','H'):2,
+    ('N','C'):4,
+    ('O','C'):5,
+    ('O','N'):7
+} # add reversed pairs
+
+def jamesPairwiseCorrection(coords_list, species_list):
+    X, S = coords_list, species_list
+    # print(X, S)
+    params = params_list
+    E = params[0]*S.count('H') + params[1]*S.count('C') + params[2]*S.count('N') + params[3]*S.count('O')
+    for i, a in enumerate(X): # i is index, a is (x,y,z)
+        for j, b in enumerate(X[i+1:]): # j is index, b is (x,y,z)
+            j += i+1
+            if S[i]=='H' and S[j]=='H':
+                continue # ignore H for speed and physics
+            r2 = (a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2
+            basis1 = np.exp(-0.5*r2)
+            basis2 = basis1*basis1
+            basis3 = basis2*basis1
+            basis4 = basis3*basis1
+            input_index = pair_indices[ (S[i],S[j]) ]
+            E += basis1 * params[ n_atom_types + n_pairs*0 + input_index ]
+            E += basis2 * params[ n_atom_types + n_pairs*1 + input_index ]
+            E += basis3 * params[ n_atom_types + n_pairs*2 + input_index ]
+            E += basis4 * params[ n_atom_types + n_pairs*3 + input_index ]
+    return E
+
+
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
   res = []
@@ -86,7 +150,8 @@ def parse_xyz(xyz_file):
 
         wb97offset = 0
         mo62xoffset = 0
-        js18offset = 0 
+        js18offset = 0
+        js18pairwiseOffset = jamesPairwiseCorrection(coords, elems)/HARTREE_TO_KCAL_PER_MOL
 
         for z in Z:
             wb97offset += atomizationEnergiesWB97[z]
@@ -124,8 +189,7 @@ def load_ff_files(ff_dir):
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
-    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL
-):
+    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
     """
     Load the ANI dataset.
 
@@ -142,8 +206,6 @@ def load_hdf5_files(
         respective atoms.
 
     """
-
-
 
     Xs = []
     ys = []
@@ -192,18 +254,22 @@ def load_hdf5_files(
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
-                y = E[k] - js18offset + calibration_offset
+                js18pairwiseOffset = jamesPairwiseCorrection(R[k], S)/HARTREE_TO_KCAL_PER_MOL
+
+                y = E[k] - js18pairwiseOffset + calibration_offset
 
                 # y = E[k] - wb97offset + calibration_offset
                 ys.append(y)
                 X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                 Xs.append(X)
 
-    # import matplotlib.mlab as mlab
-    # import matplotlib.pyplot as plt
+    import matplotlib.mlab as mlab
+    import matplotlib.pyplot as plt
 
-    # n, bins, patches = plt.hist(ys, 100, facecolor='green', alpha=0.75)
-    # plt.show()
+    n, bins, patches = plt.hist(ys, 100, facecolor='green', alpha=0.75)
+    plt.show()
+
+    assert 0
 
     return Xs, ys
 
@@ -222,9 +288,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(data_dir_train):
 
-
-        # assert 0 
-
         cal_map = load_calibration_file(CALIBRATION_FILE)
 
         Xs, ys = load_hdf5_files([
@@ -232,8 +295,8 @@ if __name__ == "__main__":
             os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s02.h5"),
             os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s03.h5"),
             os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s04.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s05.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s06.h5"),
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s05.h5"),
+            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s06.h5"),
             # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s07.h5"),
             # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s08.h5"),
         ], calibration_map=cal_map)
@@ -251,8 +314,8 @@ if __name__ == "__main__":
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
 
-        subsample_size = int(2e5)
-        # subsample_size = len(Xs)
+        # subsample_size = int(2e5)
+        subsample_size = len(Xs)
 
         assert subsample_size <= len(Xs)
 
@@ -362,13 +425,12 @@ if __name__ == "__main__":
  
     best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
 
-    local_epoch_count = 0 # epochs within a learning rate
-    max_local_epoch_count = 50 
+    max_local_epoch_count = 100
 
     train_ops = [trainer.global_step, trainer.learning_rate, trainer.rmse, train_op_exp]
 
     for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
-    # for lr in [1e-4, 1e-5]:
+        local_epoch_count = 0 # epochs within a learning rate
 
         print("setting learning rate to", lr)
         sess.run(tf.assign(trainer.learning_rate, lr))
