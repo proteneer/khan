@@ -20,7 +20,7 @@ setup(
   ext_modules=[
     Extension('correction',
               sources=['khan/data/correction.pyx'],
-              extra_compile_args=['-O3', "-march=native"],
+              extra_compile_args=['-O3', '-Ofast', "-march=native"],
               language='c++')
     ],
   include_dirs=[numpy.get_include()],
