@@ -14,35 +14,32 @@ from khan.data.dataset import RawDataset, FeaturizedDataset
 
 from concurrent.futures import ThreadPoolExecutor
 
+import argparse
+
+
 HARTREE_TO_KCAL_PER_MOL = 627.509
 
-atomizationEnergiesWB97 = np.array([
+selfIxnNrgWB97 = np.array([
     -0.500607632585,
     -37.8302333826,
     -54.5680045287,
     -75.0362229210], dtype=np.float32)
 
-atomizationEnergiesMO62x = np.array([
+selfIxnNrgMO62x = np.array([
    -0.498135,
    -37.841399,
    -54.586413,
    -75.062826,
 ], dtype=np.float32)
 
-atomizationEnergiesJS18 = np.array([
-    -379.47160374/HARTREE_TO_KCAL_PER_MOL,
-    -23887.88837703/HARTREE_TO_KCAL_PER_MOL,
-    -34328.09841337/HARTREE_TO_KCAL_PER_MOL,
-    -47175.24402322/HARTREE_TO_KCAL_PER_MOL,
-])
+import correction
 
-CALIBRATION_FILE = "/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt"
+ANI_TRAIN_DIR = os.environ["ANI_TRAIN_DIR"]
+ANI_WORK_DIR = os.environ["ANI_WORK_DIR"]
 
-ROITBERG_ANI_DIR = "/home/yutong/roitberg_data/ANI-1_release"
-ROTAMER_TRAIN_DIR = "/home/yutong/roitberg_data/ANI-1_release/rotamers/train"
-ROTAMER_TEST_DIR = "/home/yutong/roitberg_data/ANI-1_release/rotamers/test"
-
-WORK_DIR = "/media/yutong/nvme_ssd/v3/" # put this on a fast SSD with 1 TB of data
+CALIBRATION_FILE = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
+ROTAMER_TRAIN_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/train")
+ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
 
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
@@ -65,7 +62,10 @@ def load_calibration_file(calibration_file):
 
         return mapping
 
-def parse_xyz(xyz_file):
+def parse_xyz(xyz_file, use_fitted):
+    """
+    If use_fitted is False, return the mo62x atomization energies. Otherwise, return a fitted energy.
+    """
     with open(xyz_file, "r") as fh:
 
         header = fh.readline()
@@ -82,29 +82,27 @@ def parse_xyz(xyz_file):
             elems.append(elem)
             coords.append((float(res[1]),float(res[2]),float(res[3])))
 
+        coords = np.array(coords, dtype=np.float32)
+
         Z = convert_species_to_atomic_nums(elems)
 
-        wb97offset = 0
         mo62xoffset = 0
-        js18offset = 0 
+        js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
 
         for z in Z:
-            wb97offset += atomizationEnergiesWB97[z]
-            mo62xoffset += atomizationEnergiesMO62x[z]
-            js18offset += atomizationEnergiesJS18[z]
-        # print(xyz_file, "Y", y, mo62xoffset)
+            mo62xoffset += selfIxnNrgMO62x[z]
 
-        y = y - js18offset
-        # y = y - mo62xoffset
-        # print(y)
+        if use_fitted:
+            y -= js18pairwiseOffset
+        else:
+            y -= mo62xoffset 
 
         R = np.array(coords, dtype=np.float32)
         X = np.concatenate([np.expand_dims(Z, 1), R], axis=1)
 
-
         return X, y
 
-def load_ff_files(ff_dir):
+def load_ff_files(ff_dir, use_fitted=False):
     Xs = []
     ys = []
     for root, dirs, files in os.walk(ff_dir):
@@ -112,20 +110,28 @@ def load_ff_files(ff_dir):
             rootname, extension = os.path.splitext(filename)
             if extension == ".xyz":
                 filepath = os.path.join(root, filename)
-                X, y = parse_xyz(filepath)
+                X, y = parse_xyz(filepath, use_fitted)
                 Xs.append(X)
                 ys.append(y)
             else:
                 print("Unknown filetype:", filename)
-    print(len(Xs), len(ys))
+
+    # import matplotlib.mlab as mlab
+    # import matplotlib.pyplot as plt
+
+    # n, bins, patches = plt.hist(ys, 300, facecolor='green', alpha=0.75)
+    # plt.show()
+
+    # assert 0
+    # print(len(Xs), len(ys))
     return Xs, ys
 
 
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
-    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL
-):
+    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL,
+    use_fitted=False):
     """
     Load the ANI dataset.
 
@@ -135,6 +141,10 @@ def load_hdf5_files(
         List of paths to hdf5 files that will be used to generate the dataset. The data should be
         in the format used by the ANI-1 dataset.
 
+    use_fitted: bool
+        If use_fitted is False, return the mo62x atomization energies. Otherwise, return a fitted energy.
+
+
     Returns
     -------
     Dataset, list of int
@@ -142,8 +152,6 @@ def load_hdf5_files(
         respective atoms.
 
     """
-
-
 
     Xs = []
     ys = []
@@ -166,44 +174,93 @@ def load_hdf5_files(
             path = P.split("/")[-1]
 
             Z = convert_species_to_atomic_nums(S)
-            minimum = np.amin(E)
+            minimum_wb97 = np.amin(E)
 
-            wb97offset = 0
-            mo62xoffset = 0
-            js18offset = 0 
+            if use_fitted:
 
-            for z in Z:
-                wb97offset += atomizationEnergiesWB97[z]
-                mo62xoffset += atomizationEnergiesMO62x[z]
-                js18offset += atomizationEnergiesJS18[z]
+                calibration_offset = 0
 
-            calibration_offset = 0
+                if calibration_map:
+                    calibration_offset = calibration_map[path] - minimum_wb97 
 
-            # temporarily disable
+                for k in range(len(E)):
+                    if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
+                        continue
+                    js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
+                    y = E[k] - js18pairwiseOffset + calibration_offset
+                    ys.append(y)
+                    X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+                    Xs.append(X)
+
+            else:
+                wb97offset = 0
+                mo62xoffset = 0
+
+                for z in Z:
+                    wb97offset += selfIxnNrgWB97[z]
+                    mo62xoffset += selfIxnNrgMO62x[z]
+
+                calibration_offset = 0
+
+                if calibration_map:
+                    min_atomization_wb97 = minimum_wb97 - wb97offset
+                    min_atomization_mo62x = calibration_map[path] - mo62xoffset
+                    # difference between the wb97_min and the mo62x_min
+                    calibration_offset = min_atomization_mo62x - min_atomization_wb97
+
+                for k in range(len(E)):
+                    if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
+                        continue
+                    y = E[k] - wb97offset + calibration_offset
+
+                    ys.append(y)
+                    X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+                    Xs.append(X)
+
+
+            # wb97offset = 0
+            # mo62xoffset = 0
+
+            # for z in Z:
+            #     wb97offset += selfIxnNrgWB97[z]
+            #     mo62xoffset += selfIxnNrgMO62x[z]
+            #     # js18offset += atomizationEnergiesJS18[z]
+
+            # calibration_offset = 0
+
+            # # # temporarily disable
+            # # if calibration_map:
+            # #     min_atomization_wb97 = minimum - wb97offset
+            # #     min_atomization_mo62x = calibration_map[path] - mo62xoffset
+            # #     calibration_offset = min_atomization_mo62x - min_atomization_wb97
+
             # if calibration_map:
-            #     min_atomization_wb97 = minimum - wb97offset
-            #     min_atomization_mo62x = calibration_map[path] - mo62xoffset
-            #     calibration_offset = min_atomization_mo62x - min_atomization_wb97
+            #     calibration_offset = calibration_map[path] - minimum 
 
-            if calibration_map:
-                calibration_offset = calibration_map[path] - minimum 
+            # for k in range(len(E)):
+            #     if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
+            #         continue
 
-            for k in range(len(E)):
-                if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
-                    continue
+            #     js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
+            #     y = E[k] - js18pairwiseOffset + calibration_offset
+            #     # y = E[k] - js18pairwiseOffset
 
-                y = E[k] - js18offset + calibration_offset
+            #     # print(y)
 
-                # y = E[k] - wb97offset + calibration_offset
-                ys.append(y)
-                X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
-                Xs.append(X)
+            #     # y = E[k] - wb97offset + calibration_offset
+            #     #     wb97     fitted on wb97        m062x_offset
+            #     # y = E[k] - customJamesSelfIxn + calibration_offset
+            #     ys.append(y)
+            #     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+            #     Xs.append(X)
 
     # import matplotlib.mlab as mlab
     # import matplotlib.pyplot as plt
 
-    # n, bins, patches = plt.hist(ys, 100, facecolor='green', alpha=0.75)
+    # n, bins, patches = plt.hist(ys, 400, facecolor='green', alpha=0.75)
     # plt.show()
+
+    # assert 0
 
     return Xs, ys
 
@@ -212,47 +269,60 @@ def load_hdf5_files(
 
 if __name__ == "__main__":
 
+    print("ANI TRAIN AND WORK DIRS", ANI_TRAIN_DIR, ANI_WORK_DIR)
+
     batch_size = 1024
 
-    save_dir = os.path.join(WORK_DIR, "save")
-    data_dir_train = os.path.join(WORK_DIR, "train")
-    data_dir_test = os.path.join(WORK_DIR, "test")
-    data_dir_gdb11 = os.path.join(WORK_DIR, "gdb11")
-    data_dir_fftest = os.path.join(WORK_DIR, "fftest")
+    save_dir = os.path.join(ANI_WORK_DIR, "save")
+    data_dir_train = os.path.join(ANI_WORK_DIR, "train")
+    data_dir_test = os.path.join(ANI_WORK_DIR, "test")
+    data_dir_gdb11 = os.path.join(ANI_WORK_DIR, "gdb11")
+    data_dir_fftest = os.path.join(ANI_WORK_DIR, "fftest")
+
+
+    parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
+    parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
+
+    args = parser.parse_args()
+
+    use_fitted = args.fitted
+    add_ffdata = args.add_ffdata
+
+    print("use_fitted, add_ffdata", use_fitted, add_ffdata)
 
     if not os.path.exists(data_dir_train):
-
-
-        # assert 0 
 
         cal_map = load_calibration_file(CALIBRATION_FILE)
 
         Xs, ys = load_hdf5_files([
-            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s01.h5"),
-            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s02.h5"),
-            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s03.h5"),
-            os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s04.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s05.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s06.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s07.h5"),
-            # os.path.join(ROITBERG_ANI_DIR, "ani_gdb_s08.h5"),
-        ], calibration_map=cal_map)
+            os.path.join(ANI_TRAIN_DIR, "ani_gdb_s01.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s02.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s03.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s04.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s05.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s06.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s07.h5"),
+            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s08.h5"),
+        ], calibration_map=cal_map, use_fitted=use_fitted)
 
-        print("Loading ff training data...")
-        ff_train_Xs, ff_train_ys = load_ff_files(ROTAMER_TRAIN_DIR)
 
         print("Loading ff testing data...")
-        ff_test_Xs, ff_test_ys = load_ff_files(ROTAMER_TEST_DIR)
+        ff_test_Xs, ff_test_ys = load_ff_files(ROTAMER_TEST_DIR, use_fitted=use_fitted)
 
+        if add_ffdata:
+            print("Loading ff training data...")
+            ff_train_Xs, ff_train_ys = load_ff_files(ROTAMER_TRAIN_DIR, use_fitted=use_fitted)
 
-        Xs.extend(ff_train_Xs) # add training data here
-        ys.extend(ff_train_ys)
+            Xs.extend(ff_train_Xs) # add training data here
+            ys.extend(ff_train_ys)
 
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
 
-        subsample_size = int(2e5)
-        # subsample_size = len(Xs)
+        # subsample_size = int(2e5)
+        subsample_size = len(Xs)
 
         assert subsample_size <= len(Xs)
 
@@ -266,7 +336,7 @@ if __name__ == "__main__":
         rd_test  = RawDataset(X_test,  y_test)
 
         X_gdb11, y_gdb11 = load_hdf5_files([
-            os.path.join(ROITBERG_ANI_DIR, "ani1_gdb10_ts.h5"),
+            os.path.join(ANI_TRAIN_DIR, "ani1_gdb10_ts.h5"),
         ])
 
         rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
@@ -362,13 +432,12 @@ if __name__ == "__main__":
  
     best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
 
-    local_epoch_count = 0 # epochs within a learning rate
-    max_local_epoch_count = 50 
+    max_local_epoch_count = 100
 
     train_ops = [trainer.global_step, trainer.learning_rate, trainer.rmse, train_op_exp]
 
     for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
-    # for lr in [1e-4, 1e-5]:
+        local_epoch_count = 0 # epochs within a learning rate
 
         print("setting learning rate to", lr)
         sess.run(tf.assign(trainer.learning_rate, lr))
