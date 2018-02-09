@@ -34,13 +34,6 @@ selfIxnNrgMO62x = np.array([
 
 import correction
 
-ANI_TRAIN_DIR = os.environ["ANI_TRAIN_DIR"]
-ANI_WORK_DIR = os.environ["ANI_WORK_DIR"]
-
-CALIBRATION_FILE = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
-ROTAMER_TRAIN_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/train")
-ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
-
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
   res = []
@@ -269,7 +262,31 @@ def load_hdf5_files(
 
 if __name__ == "__main__":
 
-    print("ANI TRAIN AND WORK DIRS", ANI_TRAIN_DIR, ANI_WORK_DIR)
+
+
+    parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
+    parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
+    parser.add_argument('--prod', default=False, action='store_true', help="Whether we run over all of gdb8")
+
+    parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
+    parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
+
+    args = parser.parse_args()
+    print("Arguments", args)
+
+
+    ANI_TRAIN_DIR = args.train_dir
+    ANI_WORK_DIR = args.work_dir
+
+    CALIBRATION_FILE_TRAIN = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
+    CALIBRATION_FILE_TEST = os.path.join(ANI_TRAIN_DIR, "gdb_11_cal.txt")
+    ROTAMER_TRAIN_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/train")
+    ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
+
+
+    # print("ANI TRAIN AND WORK DIRS", ANI_TRAIN_DIR, ANI_WORK_DIR)
 
     batch_size = 1024
 
@@ -279,14 +296,6 @@ if __name__ == "__main__":
     data_dir_gdb11 = os.path.join(ANI_WORK_DIR, "gdb11")
     data_dir_fftest = os.path.join(ANI_WORK_DIR, "fftest")
 
-
-    parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-
-    parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
-    parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
-
-    args = parser.parse_args()
-
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
 
@@ -294,18 +303,25 @@ if __name__ == "__main__":
 
     if not os.path.exists(data_dir_train):
 
-        cal_map = load_calibration_file(CALIBRATION_FILE)
+        cal_map_train = load_calibration_file(CALIBRATION_FILE_TRAIN)
+        cal_map_test = load_calibration_file(CALIBRATION_FILE_TEST)
 
-        Xs, ys = load_hdf5_files([
-            os.path.join(ANI_TRAIN_DIR, "ani_gdb_s01.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s02.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s03.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s04.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s05.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s06.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s07.h5"),
-            # os.path.join(ANI_TRAIN_DIR, "ani_gdb_s08.h5"),
-        ], calibration_map=cal_map, use_fitted=use_fitted)
+
+        if args.prod:
+            gdb_files = [
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s01.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s02.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s03.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s04.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s05.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s06.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s07.h5"),
+                os.path.join(ANI_TRAIN_DIR, "ani_gdb_s08.h5"),
+            ]
+        else:
+            gdb_files = [os.path.join(ANI_TRAIN_DIR, "ani_gdb_s01.h5")]
+
+        Xs, ys = load_hdf5_files(gdb_files, calibration_map=cal_map_train, use_fitted=use_fitted)
 
 
         print("Loading ff testing data...")
@@ -321,7 +337,6 @@ if __name__ == "__main__":
         # shuffle dataset
         Xs, ys = sklearn.utils.shuffle(Xs, ys)
 
-        # subsample_size = int(2e5)
         subsample_size = len(Xs)
 
         assert subsample_size <= len(Xs)
@@ -335,9 +350,10 @@ if __name__ == "__main__":
         rd_train = RawDataset(X_train, y_train)
         rd_test  = RawDataset(X_test,  y_test)
 
+        print("Loading gdb11 test set...")
         X_gdb11, y_gdb11 = load_hdf5_files([
             os.path.join(ANI_TRAIN_DIR, "ani1_gdb10_ts.h5"),
-        ])
+        ], calibration_map=cal_map_test, use_fitted=use_fitted)
 
         rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
         rd_fftest  = RawDataset(ff_test_Xs, ff_test_ys)
