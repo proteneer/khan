@@ -103,7 +103,7 @@ class Trainer():
 
         def submitter():
             for b_idx, (f0, f1, f2, f3, gi, mi, yt) in enumerate(dataset.iterate(shuffle=shuffle)):
-                # print("submitting...", b_idx)
+                # print("submitting...", len(yt))
                 try:
                     session.run(self.put_op, feed_dict={
                         self.f0_enq: f0,
@@ -123,9 +123,8 @@ class Trainer():
         results = []
 
         for i in range(dataset.num_batches()):
-            # print("running...")
-            results.append(session.run(target_ops))
-            # print(res)
+            res = session.run(target_ops)
+            results.append(res)
 
         return results
 

@@ -7,6 +7,7 @@ import tensorflow as tf
 import sklearn
 import sklearn.model_selection
 
+from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from khan.training.trainer import Trainer
 from khan.data import pyanitools as pya
@@ -94,6 +95,25 @@ def parse_xyz(xyz_file, use_fitted):
         X = np.concatenate([np.expand_dims(Z, 1), R], axis=1)
 
         return X, y
+
+
+def load_ff_files_groups(ff_dir, use_fitted=False):
+    ys = []
+
+    for gidx, (root, dirs, files) in enumerate(os.walk(ff_dir)):
+        group_ys = []
+        for filename in files:
+            rootname, extension = os.path.splitext(filename)
+            if extension == ".xyz":
+                filepath = os.path.join(root, filename)
+                _, y = parse_xyz(filepath, use_fitted)
+                group_ys.append(y)
+            else:
+                print("Unknown filetype:", filename)
+        if len(group_ys) > 0:
+            ys.append(group_ys)
+
+    return ys
 
 def load_ff_files(ff_dir, use_fitted=False):
     Xs = []
@@ -211,42 +231,6 @@ def load_hdf5_files(
                     Xs.append(X)
 
 
-            # wb97offset = 0
-            # mo62xoffset = 0
-
-            # for z in Z:
-            #     wb97offset += selfIxnNrgWB97[z]
-            #     mo62xoffset += selfIxnNrgMO62x[z]
-            #     # js18offset += atomizationEnergiesJS18[z]
-
-            # calibration_offset = 0
-
-            # # # temporarily disable
-            # # if calibration_map:
-            # #     min_atomization_wb97 = minimum - wb97offset
-            # #     min_atomization_mo62x = calibration_map[path] - mo62xoffset
-            # #     calibration_offset = min_atomization_mo62x - min_atomization_wb97
-
-            # if calibration_map:
-            #     calibration_offset = calibration_map[path] - minimum 
-
-            # for k in range(len(E)):
-            #     if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
-            #         continue
-
-            #     js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
-            #     y = E[k] - js18pairwiseOffset + calibration_offset
-            #     # y = E[k] - js18pairwiseOffset
-
-            #     # print(y)
-
-            #     # y = E[k] - wb97offset + calibration_offset
-            #     #     wb97     fitted on wb97        m062x_offset
-            #     # y = E[k] - customJamesSelfIxn + calibration_offset
-            #     ys.append(y)
-            #     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
-            #     Xs.append(X)
-
     # import matplotlib.mlab as mlab
     # import matplotlib.pyplot as plt
 
@@ -257,6 +241,12 @@ def load_hdf5_files(
 
     return Xs, ys
 
+
+def flatten_results(res):
+    flattened = []
+    for l in res:
+        flattened.append(l[0])
+    return np.concatenate(flattened).reshape((-1,))
 
 
 
@@ -444,13 +434,22 @@ if __name__ == "__main__":
  
     l2_losses = [trainer.l2]
 
-    test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses)
- 
-    best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
+    # test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses) 
+    # best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
 
     max_local_epoch_count = 100
 
     train_ops = [trainer.global_step, trainer.learning_rate, trainer.rmse, train_op_exp]
+
+    print("Loading ff testing group data...")
+    ff_test_group_ys = load_ff_files_groups(ROTAMER_TEST_DIR, use_fitted=use_fitted)
+
+    fftest_ys = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=[trainer.model.predict_op()])
+    fftest_eh_rmse = ed_harder_rmse(ff_test_group_ys, flatten_results(fftest_ys))
+    fftest_l2s = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=l2_losses)
+    fftest_rmse = np.sqrt(np.mean(flatten_results(fftest_l2s)))
+
+    print("fftest eh_rmse, rmse", fftest_eh_rmse, fftest_rmse)
 
     for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
         local_epoch_count = 0 # epochs within a learning rate
@@ -462,26 +461,28 @@ if __name__ == "__main__":
             # sess.run(max_norm_ops) # extraneous, do once at the beginning
             train_results = trainer.feed_dataset(sess, fd_train, shuffle=True, target_ops=train_ops)
             sess.run(max_norm_ops)
-
             global_epoch = train_results[0][0] // fd_train.num_batches()
+            # global_epoch = 0
 
             test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses)
 
-            test_rmse = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
+            test_rmse = np.sqrt(np.mean(flatten_results(test_l2s)))
 
             if test_rmse < best_test_score:
-
                 sp = saver.save(sess, save_path, global_step=trainer.global_step)
 
                 gdb11_l2s = trainer.feed_dataset(sess, fd_gdb11, shuffle=False, target_ops=l2_losses)
-                gdb11_rmse = np.sqrt(np.mean(np.concatenate(gdb11_l2s).reshape((-1,))))
+                gdb11_rmse = np.sqrt(np.mean(flatten_results(gdb11_l2s)))
+
+                fftest_ys = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=[trainer.model.predict_op()])
+                fftest_eh_rmse = ed_harder_rmse(ff_test_group_ys, flatten_results(fftest_ys))
 
                 fftest_l2s = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=l2_losses)
-                fftest_rmse = np.sqrt(np.mean(np.concatenate(fftest_l2s).reshape((-1,))))
+                fftest_rmse = np.sqrt(np.mean(flatten_results(fftest_l2s)))
 
                 print("Better g-epo:", global_epoch, "| lr:", lr, \
                       "| l-epo:", local_epoch_count, \
-                      "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse, "| fftest rmse:", fftest_rmse)
+                      "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse, "| fftest rmse:", fftest_rmse, "| eh rmse:", fftest_eh_rmse)
 
                 local_epoch_count = 0
                 best_test_score = test_rmse
