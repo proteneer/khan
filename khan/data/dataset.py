@@ -154,11 +154,11 @@ class FeaturizedDataset():
             pool = Pool(1)  # mp.dummy aliases ThreadPool to Pool
             next_shard = pool.apply_async(load_shard, (perm[0],))
 
-            for ss_idx, shard_idx in enumerate(perm):
-
+            # buggy as fuck
+            for ss_idx, _ in enumerate(perm):
                 res = next_shard.get()
                 if ss_idx != len(perm) - 1:
-                    next_shard = pool.apply_async(load_shard, (shard_idx,))
+                    next_shard = pool.apply_async(load_shard, (perm[ss_idx+1],))
                 else:
                     pool.close()
 
