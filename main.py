@@ -434,8 +434,8 @@ if __name__ == "__main__":
  
     l2_losses = [trainer.l2]
 
-    # test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses) 
-    # best_test_score = np.sqrt(np.mean(np.concatenate(test_l2s).reshape((-1,))))
+    test_l2s = trainer.feed_dataset(sess, fd_test, shuffle=False, target_ops=l2_losses) 
+    best_test_score = np.sqrt(np.mean(flatten_results(test_l2s)))
 
     max_local_epoch_count = 100
 
@@ -451,7 +451,7 @@ if __name__ == "__main__":
 
     print("fftest eh_rmse, rmse", fftest_eh_rmse, fftest_rmse)
 
-    for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
+    for lr in [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
         local_epoch_count = 0 # epochs within a learning rate
 
         print("setting learning rate to", lr)
@@ -480,7 +480,7 @@ if __name__ == "__main__":
                 fftest_l2s = trainer.feed_dataset(sess, fd_fftest, shuffle=False, target_ops=l2_losses)
                 fftest_rmse = np.sqrt(np.mean(flatten_results(fftest_l2s)))
 
-                print("Better g-epo:", global_epoch, "| lr:", lr, \
+                print(time.strftime("%Y-%m-%d %H:%M"), "Better g-epo:", global_epoch, "| lr:", lr, \
                       "| l-epo:", local_epoch_count, \
                       "| test rmse:", test_rmse, "| gdb11 rmse:", gdb11_rmse, "| fftest rmse:", fftest_rmse, "| eh rmse:", fftest_eh_rmse)
 
@@ -488,7 +488,7 @@ if __name__ == "__main__":
                 best_test_score = test_rmse
             else:
 
-                print("Worse g-epo:", global_epoch, "| lr:", lr, \
+                print(time.strftime("%Y-%m-%d %H:%M"), "Worse g-epo:", global_epoch, "| lr:", lr, \
                       "| l-epo:", local_epoch_count, \
                       "| test rmse:", test_rmse)
                 local_epoch_count += 1
