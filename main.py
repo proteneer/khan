@@ -40,7 +40,9 @@ def convert_species_to_atomic_nums(s):
   res = []
   for k in s:
     res.append(PERIODIC_TABLE[k])
-  return np.array(res, dtype=np.int32)
+  res =  np.array(res, dtype=np.int32)
+  np.ascontiguousarray(res)
+  return res
 
 
 def load_calibration_file(calibration_file):
@@ -81,7 +83,7 @@ def parse_xyz(xyz_file, use_fitted):
         Z = convert_species_to_atomic_nums(elems)
 
         mo62xoffset = 0
-        js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
+        js18pairwiseOffset = correction.jamesTripletCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
 
         for z in Z:
             mo62xoffset += selfIxnNrgMO62x[z]
@@ -199,7 +201,7 @@ def load_hdf5_files(
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
                         continue
-                    js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
+                    js18pairwiseOffset = correction.jamesTripletCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
                     y = E[k] - js18pairwiseOffset + calibration_offset
                     ys.append(y)
                     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
@@ -223,6 +225,8 @@ def load_hdf5_files(
 
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
+                        print("skipping")
+                        # assert 0
                         continue
                     y = E[k] - wb97offset + calibration_offset
 
@@ -231,13 +235,17 @@ def load_hdf5_files(
                     Xs.append(X)
 
 
-    # import matplotlib.mlab as mlab
-    # import matplotlib.pyplot as plt
+    import matplotlib.mlab as mlab
+    import matplotlib.pyplot as plt
 
-    # n, bins, patches = plt.hist(ys, 400, facecolor='green', alpha=0.75)
-    # plt.show()
+    print(np.max(ys), np.min(ys))
 
-    # assert 0
+    n, bins, patches = plt.hist(ys, 600, facecolor='green', alpha=0.75)
+    plt.show()
+
+    # 22057374
+
+    assert 0
 
     return Xs, ys
 
@@ -251,6 +259,8 @@ def flatten_results(res):
 
 
 if __name__ == "__main__":
+
+
 
 
 
@@ -288,6 +298,9 @@ if __name__ == "__main__":
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
+
+    # debug forcefield all
+    ff_train_Xs, ff_train_ys = load_ff_files(os.path.join(ANI_TRAIN_DIR, "rotamers/all"), use_fitted=use_fitted)
 
     print("use_fitted, add_ffdata", use_fitted, add_ffdata)
 

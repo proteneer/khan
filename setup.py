@@ -18,9 +18,12 @@ import numpy
 setup(
   name = 'Test app',
   ext_modules=[
-    Extension('correction',
-              sources=['khan/data/correction.pyx'],
+  Extension('correction',
+             sources=['khan/data/correction.pyx'],
+	# Extension('fast_basis',
+              # sources=['fast_basis.pyx'],
               extra_compile_args=['-O3', '-Ofast', "-march=native"],
+              # extra_compile_args=['-g'],
               language='c++')
     ],
   include_dirs=[numpy.get_include()],
