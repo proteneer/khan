@@ -78,10 +78,6 @@ if __name__ == "__main__":
     if os.path.exists(save_dir):
         print("Loading saved model..")
         trainer.load(save_dir)
-
-
-
-
     else:
         print("Initializing...")
         trainer.initialize()
@@ -101,7 +97,9 @@ if __name__ == "__main__":
 
     best_test_score = trainer.eval_abs_rmse(fd_test)
 
-    while sess.run(trainer.learning_rate) > 1e-10:
+    print("------------Starting Training--------------")
+
+    while sess.run(trainer.learning_rate) > 5e-10:
 
         while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
@@ -111,22 +109,19 @@ if __name__ == "__main__":
                 shuffle=True,
                 target_ops=train_ops)
 
-            # print("TR", train_results)
-
             train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
 
-            # train_abs_rmse = train_results[2]
             global_epoch = train_results[0][0] // fd_train.num_batches()
             learning_rate = train_results[0][1]
             local_epoch_count = train_results[0][2]
 
             test_abs_rmse = trainer.eval_abs_rmse(fd_test)
-            print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.1e}".format(learning_rate), \
+            print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
              'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse),
              'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
             if test_abs_rmse < best_test_score:
-                trainer.save(save_dir)
+                trainer.save_best_params()
                 gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
                 print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                 for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
@@ -139,16 +134,19 @@ if __name__ == "__main__":
             else:
                 sess.run(trainer.incr_local_epoch_count)
 
+            trainer.save(save_dir)
+
             print('', end='\n')
 
         sess.run(trainer.decr_learning_rate)
         sess.run(trainer.reset_local_epoch_count)
+        trainer.load_best_params()
 
         # print("DECR RESULT", sess.run(trainer.learning_rate))
 
 
-    tot_time = time.time() - st # this logic is a little messed up
+    # tot_time = time.time() - st # this logic is a little messed up
 
-    tpm = tot_time/(fd_train.num_batches()*batch_size*num_epochs*3)
-    print("Time Per Mol:", tpm, "seconds")
-    print("Samples per minute:", 60/tpm)
+    # tpm = tot_time/(fd_train.num_batches()*batch_size*num_epochs*3)
+    # print("Time Per Mol:", tpm, "seconds")
+    # print("Samples per minute:", 60/tpm)

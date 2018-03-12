@@ -54,35 +54,22 @@ class Trainer():
     def initialize(self):
         self.sess.run(tf.global_variables_initializer())
 
-    def save(self, save_dir):
+    def save_best_params(self):
+        self.sess.run(self.save_best_params_ops)
 
+    def load_best_params(self):
+        self.sess.run(self.load_best_params_ops)
+
+    def save(self, save_dir):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        save_prefix = "ani"
-        save_path = os.path.join(save_dir, save_prefix)
+        save_path = os.path.join(save_dir, "model.ckpt")
+        self.saver.save(self.sess, save_path)
 
-        # with tf.sess:
-            # print
-
-        save_path = self.saver.save(self.sess, save_path, global_step=self.global_step)
-
-        # print(tf.train)
-
-        # print("Saving to...", save_path)
 
     def load(self, save_dir):
-        save_prefix = "ani"
-        save_path = os.path.join(save_dir, save_prefix)
-        checkpoints = glob.glob(save_path+"*.index")
-        max_gstep = 0
-        for f in checkpoints:
-            g_step = int(f.split('.')[0].split("-")[1])
-            if g_step > max_gstep:
-                max_gstep = g_step
-
-        last_file = save_path+"-"+str(max_gstep)
-        print("loading from", last_file)
-        self.saver.restore(self.sess, last_file)
+        save_path = os.path.join(save_dir, "model.ckpt")
+        self.saver.restore(self.sess, save_path)
 
     def __init__(
         self,
@@ -101,10 +88,18 @@ class Trainer():
         """
         Model for full end-to-end.
         """
-
         self.sess = sess
-
         self.model = model
+        self.best_params = []
+        self.save_best_params_ops = []
+        self.load_best_params_ops = []
+
+        for var in tf.trainable_variables():
+            var_copy = tf.Variable(var, name="best_"+var.name.split(":")[0], trainable=False)
+            self.best_params.append(var_copy)
+            self.save_best_params_ops.append(tf.assign(var_copy, var))
+            self.load_best_params_ops.append(tf.assign(var, var_copy))
+
         self.l2 = tf.squared_difference(self.model.predict_op(), labels)
         self.rmse = tf.sqrt(tf.reduce_mean(self.l2))
 
@@ -152,7 +147,6 @@ class Trainer():
         self.mi_enq = mi_enq
         self.yt_enq = yt_enq
         self.put_op = put_op
-
 
         # ytz: finalized - so the saver needs to be at the end when all vars have been created.
         # (though not necessarily initialized)
