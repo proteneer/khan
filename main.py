@@ -10,7 +10,7 @@ import sklearn.model_selection
 
 from khan.training.trainer import Trainer, flatten_results
 
-
+from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
@@ -93,21 +93,17 @@ if __name__ == "__main__":
     print("Evaluating Rotamer Errors:")
 
     for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-        print(name, trainer.eval_eh_rmse(ff_data, ff_groups))
+        print(name, "{0:.2f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
     max_local_epoch_count = 100
 
-    train_ops = [trainer.global_step, trainer.learning_rate, trainer.l2, train_op_exp]
+    train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, train_op_exp]
 
     best_test_score = trainer.eval_abs_rmse(fd_test)
 
-    for lr in [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9]:
-        local_epoch_count = 0 # epochs within a learning rate
+    while sess.run(trainer.learning_rate) > 1e-10:
 
-        print("setting learning rate to", lr)
-        sess.run(tf.assign(trainer.learning_rate, lr))
-
-        while local_epoch_count < max_local_epoch_count:
+        while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
             sess.run(max_norm_ops)
             train_results = trainer.feed_dataset(
@@ -117,25 +113,39 @@ if __name__ == "__main__":
 
             # print("TR", train_results)
 
-            train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=2)))
+            train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
 
             # train_abs_rmse = train_results[2]
             global_epoch = train_results[0][0] // fd_train.num_batches()
             learning_rate = train_results[0][1]
+            local_epoch_count = train_results[0][2]
 
             test_abs_rmse = trainer.eval_abs_rmse(fd_test)
-            print(time.strftime("%Y-%m-%d %H:%M"), 'epoch', global_epoch, 'lr', learning_rate, 'train abs rmse', train_abs_rmse, 'test abs rmse:', test_abs_rmse, end=' | ')
+            print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.1e}".format(learning_rate), \
+             'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse),
+             'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
             if test_abs_rmse < best_test_score:
                 trainer.save(save_dir)
                 gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
-                print('gdb11 abs rmse', gdb11_abs_rmse, end=' | ')
+                print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                 for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                    print(name, "abs/rel rmses", trainer.eval_abs_rmse(ff_data), trainer.eval_eh_rmse(ff_data, ff_groups), end=' | ')
+                    print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                        "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
 
-                local_epoch_count = 0
+                # local_epoch_count = 0
                 best_test_score = test_abs_rmse
+                sess.run(trainer.reset_local_epoch_count)
+            else:
+                sess.run(trainer.incr_local_epoch_count)
+
             print('', end='\n')
+
+        sess.run(trainer.decr_learning_rate)
+        sess.run(trainer.reset_local_epoch_count)
+
+        # print("DECR RESULT", sess.run(trainer.learning_rate))
+
 
     tot_time = time.time() - st # this logic is a little messed up
 

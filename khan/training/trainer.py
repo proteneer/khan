@@ -9,6 +9,8 @@ import khan
 from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 
+from data_utils import HARTREE_TO_KCAL_PER_MOL
+
 def flatten_results(res, pos=0):
     flattened = []
     for l in res:
@@ -109,6 +111,15 @@ class Trainer():
         self.exp_loss = tf.exp(tf.cast(self.rmse, dtype=tf.float64))
         self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
         self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(0.001), trainable=False)
+        self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.1))
+
+        self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
+
+        self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
+        self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
+
+        # self.best_loss = tf.get_variable('best_loss', tuple(), tf.float32, tf.constant_initializer(9.99e9), trainable=False)
+
         # self.optimizer_rmse = tf.train.AdamOptimizer(
         #     learning_rate=self.learning_rate,
         #     beta1=0.9,
@@ -177,11 +188,11 @@ class Trainer():
 
     def eval_abs_rmse(self, dataset):
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2])
-        return np.sqrt(np.mean(flatten_results(test_l2s)))
+        return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
     def eval_eh_rmse(self, dataset, group_ys):
         ys = self.feed_dataset(dataset, shuffle=False, target_ops=[self.model.predict_op()])
-        return ed_harder_rmse(group_ys, flatten_results(ys))
+        return ed_harder_rmse(group_ys, flatten_results(ys)) * HARTREE_TO_KCAL_PER_MOL
 
     def feed_dataset(self,
         dataset,
