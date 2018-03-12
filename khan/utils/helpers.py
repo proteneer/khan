@@ -21,7 +21,19 @@ def compute_offsets(all_Xs):
 
 def ed_harder_rmse(y_groups_true, ys_pred):
 
-    assert sum([len(a) for a in y_groups_true]) == len(ys_pred)
+    # print(sum([len(a) for a in y_groups_true]) == len(ys_pred))    
+
+    lhs = sum([len(a) for a in y_groups_true])
+    rhs = len(ys_pred)
+
+    # if sum([len(a) for a in y_groups_true]) != len(ys_pred):
+        # print()
+
+    if lhs != rhs:
+        print(lhs, rhs)
+        assert lhs == rhs
+
+    # assert sum([len(a) for a in y_groups_true]) == len(ys_pred)
     all_y_idx = 0
 
     group_rmses = []
