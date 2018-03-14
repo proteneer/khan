@@ -28,8 +28,31 @@ if __name__ == "__main__":
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
 
+    parser.add_argument('--ps', default=False, action='store_true', help="Whether or not we're a parameter server")
+    parser.add_argument('--task_idx', default=0,  help="Which data shard the worker will process")
+
+    args = parser.parse_args()
+
+    cluster = tf.train.ClusterSpec({
+        "ps": ["localhost:5432"],
+        "worker": ["localhost:5001", "localhost:5002"]
+    })
+
+    if args.ps:
+        job_name = "ps"
+    else:
+        job_name = "worker"
+
     args = parser.parse_args()
     print("Arguments", args)
+
+    server = tf.train.Server(cluster, job_name=job_name, task_index=int(args.task_idx))
+
+    if args.ps:
+        server.join()
+        sys.exit(0)
+
+    is_chief = int(args.task_idx) == 0
 
     ANI_TRAIN_DIR = args.train_dir
     ANI_WORK_DIR = args.work_dir
@@ -67,80 +90,95 @@ if __name__ == "__main__":
     eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
     eval_datasets = [fd_ffneutral_mo62x, fd_ffneutral_ccsdt, fd_ffcharged_mo62x]
 
-    sess = tf.Session()
-    trainer = Trainer.from_mnn_queue(sess)
+    # sess = tf.Session()
 
-    train_op_exp = trainer.get_train_op_exp()
-    loss_op = trainer.get_loss_op()
-    predict_op = trainer.model.predict_op()
-    max_norm_ops = trainer.get_maxnorm_ops()
+    with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % int(args.task_idx),
+        cluster=cluster)):
 
-    if os.path.exists(save_dir):
-        print("Loading saved model..")
-        trainer.load(save_dir)
-    else:
-        print("Initializing...")
-        trainer.initialize()
+        trainer = Trainer.from_mnn_queue()
+        train_op_exp = trainer.get_train_op_exp()
+        loss_op = trainer.get_loss_op()
+        predict_op = trainer.model.predict_op()
+        max_norm_ops = trainer.get_maxnorm_ops()
 
-    st = time.time()
- 
-    l2_losses = [trainer.l2]
+    with tf.train.MonitoredTrainingSession(
+        is_chief=is_chief,
+        master=server.target,
+        save_checkpoint_secs=10) as sess:
 
-    print("Evaluating Rotamer Errors:")
+        # if os.path.exists(save_dir):
+            # print("Loading saved model..")
+            # trainer.load(save_dir)
+        # else:
+        # print("Initializing...")
 
-    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-        print(name, "{0:.2f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
+        trainer.set_session(sess)
 
-    max_local_epoch_count = 100
+        if is_chief:
+            trainer.initialize()
 
-    train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, train_op_exp]
+        st = time.time()
+     
+        l2_losses = [trainer.l2]
 
-    best_test_score = trainer.eval_abs_rmse(fd_test)
+        print("Evaluating Rotamer Errors:")
 
-    print("------------Starting Training--------------")
+        # TODO: perf only if chief
 
-    while sess.run(trainer.learning_rate) > 5e-10:
+        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+            print(name, "{0:.2f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
-        while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
+        max_local_epoch_count = 100
 
-            sess.run(max_norm_ops)
-            train_results = trainer.feed_dataset(
-                fd_train,
-                shuffle=True,
-                target_ops=train_ops)
+        train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, train_op_exp]
 
-            train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+        best_test_score = trainer.eval_abs_rmse(fd_test)
 
-            global_epoch = train_results[0][0] // fd_train.num_batches()
-            learning_rate = train_results[0][1]
-            local_epoch_count = train_results[0][2]
+        print("------------Starting Training--------------")
 
-            test_abs_rmse = trainer.eval_abs_rmse(fd_test)
-            print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-             'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse),
-             'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+        while sess.run(trainer.learning_rate) > 5e-10:
 
-            if test_abs_rmse < best_test_score:
-                trainer.save_best_params()
-                gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
-                print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-                for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                    print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
-                        "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+            while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                # local_epoch_count = 0
-                best_test_score = test_abs_rmse
-                sess.run(trainer.reset_local_epoch_count)
-            else:
-                sess.run(trainer.incr_local_epoch_count)
+                sess.run(max_norm_ops)
+                train_results = trainer.feed_dataset(
+                    fd_train,
+                    shuffle=True,
+                    target_ops=train_ops)
 
-            trainer.save(save_dir)
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
 
-            print('', end='\n')
+                global_epoch = train_results[0][0] // fd_train.num_batches()
+                learning_rate = train_results[0][1]
+                local_epoch_count = train_results[0][2]
 
-        sess.run(trainer.decr_learning_rate)
-        sess.run(trainer.reset_local_epoch_count)
-        trainer.load_best_params()
+                test_abs_rmse = trainer.eval_abs_rmse(fd_test)
+                print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
+                    'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
+                    'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+
+                if test_abs_rmse < best_test_score:
+                    trainer.save_best_params()
+                    gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
+                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                        print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                            "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+
+                    # local_epoch_count = 0
+                    best_test_score = test_abs_rmse
+                    sess.run(trainer.reset_local_epoch_count)
+                else:
+                    sess.run(trainer.incr_local_epoch_count)
+
+                # trainer.save(save_dir)
+
+                print('', end='\n')
+
+            sess.run(trainer.decr_learning_rate)
+            sess.run(trainer.reset_local_epoch_count)
+            trainer.load_best_params()
 
         # print("DECR RESULT", sess.run(trainer.learning_rate))
 

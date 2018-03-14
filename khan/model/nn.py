@@ -38,6 +38,8 @@ class AtomNN():
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
+            # with tf.device(tf.train.replica_device_setter(cluster=cluster_spec)):
+
             W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
             b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
 

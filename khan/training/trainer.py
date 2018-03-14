@@ -25,7 +25,7 @@ class Trainer():
     @classmethod
     def from_mnn_queue(
         cls,
-        session):
+        session=None):
         (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq), \
         (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq), \
         put_op = mnn_staging()
@@ -51,8 +51,11 @@ class Trainer():
             session,
         )
 
+    def set_session(self, sess):
+        self.sess = sess
+
     def initialize(self):
-        self.sess.run(tf.global_variables_initializer())
+        self.sess.run(self.global_initializer_op)
 
     def save_best_params(self):
         self.sess.run(self.save_best_params_ops)
@@ -93,9 +96,16 @@ class Trainer():
         self.best_params = []
         self.save_best_params_ops = []
         self.load_best_params_ops = []
+        self.global_initializer_op = tf.global_variables_initializer()
 
         for var in tf.trainable_variables():
-            var_copy = tf.Variable(var, name="best_"+var.name.split(":")[0], trainable=False)
+
+            copy_name = "best_"+var.name.split(":")[0]
+            copy_shape = var.shape
+            copy_type = var.dtype
+
+            var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
+
             self.best_params.append(var_copy)
             self.save_best_params_ops.append(tf.assign(var_copy, var))
             self.load_best_params_ops.append(tf.assign(var, var_copy))
