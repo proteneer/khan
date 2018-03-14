@@ -51,7 +51,7 @@ class RawDataset():
 
     def featurize(self, batch_size, data_dir, symmetrizer=None):
 
-        print("featurizing", self.num_batches(batch_size), "batches")
+        print("----------------Featurizing", self.num_batches(batch_size), "batches")
         # multithreaded featurization code:
 
         # 1. Master thread executes session.run(feat_op) to get the featurized data
@@ -131,6 +131,10 @@ def generate_fnames(data_dir, s_idx):
 class FeaturizedDataset():
 
     def __init__(self, data_dir):
+
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+
         self.data_dir = data_dir
 
     def iterate(self, shuffle=False):
