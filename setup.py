@@ -9,23 +9,74 @@
 # )
 
 
+from Cython.Distutils import build_ext
+import Cython.Compiler.Options
+
+# directive_defaults = Cython.Compiler.Options.get_directive_defaults()
+# 1
+
+# directive_defaults['linetrace'] = True
+# directive_defaults['binding'] = True
+
+
+# print(directive_defaults)
 
 from distutils.core import setup
 from distutils.extension import Extension
-from Cython.Distutils import build_ext
+
 import numpy
 
+
+from Cython.Build import cythonize
+
+# extensions = [
+#     Extension("featurizer", ["khan/data/featurizer.pyx"], define_macros=[('CYTHON_TRACE', '1')], language="c++")
+# ]
+
+# setup(
+#     ext_modules = cythonize(extensions),
+#     include_dirs=[numpy.get_include()],
+#     cmdclass = {'build_ext': build_ext}
+# )
+
 setup(
-  name = 'Test app',
+  name = 'cyt',
   ext_modules=[
-  Extension('correction',
-             sources=['khan/data/correction.pyx'],
-	# Extension('fast_basis',
-              # sources=['fast_basis.pyx'],
-              extra_compile_args=['-O3', '-Ofast', "-march=native"],
-              # extra_compile_args=['-g'],
-              language='c++')
-    ],
+    Extension('featurizer',
+               sources=['khan/data/featurizer.pyx'],
+               extra_compile_args=['-O3', '-Ofast', "-march=native", '-fopenmp'],
+               extra_link_args=['-fopenmp'],
+               language='c++',
+               define_macros=[('CYTHON_TRACE', '1')]
+               ),
+    Extension('correction',
+               sources=['khan/data/correction.pyx'],
+               extra_compile_args=['-O3', '-Ofast', "-march=native", '-fopenmp'],
+               extra_link_args=['-fopenmp'],
+               language='c++',
+               define_macros=[('CYTHON_TRACE', '1')]
+               ),
+  ],
   include_dirs=[numpy.get_include()],
   cmdclass = {'build_ext': build_ext}
 )
+
+# setup(
+#   name = 'cyt',
+#   ext_modules=[
+#     Extension('featurizer',
+#                sources=['khan/data/featurizer.pyx'],
+#                extra_compile_args=['-O3', '-Ofast', "-march=native"],
+#                language='c++',
+#                define_macros=[('CYTHON_TRACE', '1')]
+#                ),
+#     Extension('correction',
+#                sources=['khan/data/correction.pyx'],
+#                extra_compile_args=['-O3', '-Ofast', "-march=native"],
+#                language='c++',
+#                define_macros=[('CYTHON_TRACE', '1')]
+#                ),
+#   ],
+#   include_dirs=[numpy.get_include()],
+#   cmdclass = {'build_ext': build_ext}
+# )

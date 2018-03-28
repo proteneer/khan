@@ -53,25 +53,25 @@ def main():
 
     args = parser.parse_args()
 
-    cluster = tf.train.ClusterSpec({
-        "ps": ["localhost:5432"],
-        # "worker": ["localhost:5001", "localhost:5002"]
-        "worker": ["localhost:5001"]
-    })
+    # cluster = tf.train.ClusterSpec({
+    #     "ps": ["localhost:5432"],
+    #     # "worker": ["localhost:5001", "localhost:5002"]
+    #     "worker": ["localhost:5001"]
+    # })
 
-    if args.ps:
-        job_name = "ps"
-    else:
-        job_name = "worker"
+    # if args.ps:
+    #     job_name = "ps"
+    # else:
+    #     job_name = "worker"
 
     args = parser.parse_args()
     print("Arguments", args)
 
-    server = tf.train.Server(cluster, job_name=job_name, task_index=int(args.task_idx))
+    # server = tf.train.Server(cluster, job_name=job_name, task_index=int(args.task_idx))
 
-    if args.ps:
-        server.join()
-        sys.exit(0)
+    # if args.ps:
+        # server.join()
+        # sys.exit(0)
 
     is_chief = int(args.task_idx) == 0
 
@@ -101,9 +101,39 @@ def main():
     else:
         ff_train_dir = None
 
-    fd_train, fd_test = data_loader.load_gdb8(ANI_WORK_DIR, ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+    rd_train, rd_test = data_loader.load_gdb8(ANI_WORK_DIR, ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+
+    with tf.Session() as sess:
+
+        print("FOO")
+
+        trainer = Trainer.from_mnn_queue(sess)
+
+        target_ops = [trainer.model.predict_op()]
+
+        train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, trainer.get_train_op_exp()]
+
+        trainer.initialize()
+
+        print("FEED START")
+
+        train_results = trainer.feed_dataset(
+            rd_train,
+            shuffle=True,
+            target_ops=target_ops)
+
+
 
     return
+
+
+    
+
+
+
+
+
+
 
 
     fd_gdb11 = data_loader.load_gdb11(data_dir_gdb11, ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)

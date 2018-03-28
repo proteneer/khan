@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <iostream>
 #include <vector>
 #include <chrono>
 
-#include "cnpy.h" // utility for reading numpy .npy files.
+// #include "cnpy.h" // utility for reading numpy .npy files.
+
+#include <cub/cub.cuh>
 
 /*
 
@@ -100,6 +103,29 @@ inline __device__ int linearize(int i, int j, int k, int l) {
     return basis*K*L + k*L + l;
 }
 
+
+__global__ void inverse(
+    const int *sort_idxs,
+    int *gather_idxs,
+    size_t n_elems) {
+    int elem_idx = blockDim.x*blockIdx.x + threadIdx.x;
+    if(elem_idx < n_elems) {
+        gather_idxs[sort_idxs[elem_idx]] = elem_idx;        
+    }
+} 
+
+__global__ void scatter(
+    const int *sorted_global_idxs,
+    const int *sorted_local_idxs,
+    int *scatter_idxs,
+    size_t n_elems) {
+    int elem_idx = blockDim.x*blockIdx.x + threadIdx.x;
+    if(elem_idx < n_elems) {
+        scatter_idxs[sorted_global_idxs[elem_idx]] = sorted_local_idxs[elem_idx];
+    }
+}
+
+
 // Remind yutong to document what these pointers are.
 __global__ void featurize(
     const float *Xs,
@@ -111,12 +137,20 @@ __global__ void featurize(
     const int *mol_atom_count,
     const int num_mols, // actually equal to blockDim.x
 
-    float *X_feat_out) {
+    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+
+    float *X_feat_out_H,
+    float *X_feat_out_C,
+    float *X_feat_out_N,
+    float *X_feat_out_O) {
+
 
     int mol_idx = blockIdx.x;
     int local_atom_idx = threadIdx.x; // local_local_atom_idx
     int num_atoms = mol_atom_count[blockIdx.x];
 
+
+    // perform a bitonic sort on sort indices
 
     // printf("num_atoms %d \n", num_atoms);
 
@@ -128,6 +162,8 @@ __global__ void featurize(
     // load all the x y z coordinates
     int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
 
+    int g_atomic_num_i = atomic_nums[g_atom_idx_i];
+
     float i_x = Xs[g_atom_idx_i];
     float i_y = Ys[g_atom_idx_i];
     float i_z = Zs[g_atom_idx_i];
@@ -135,12 +171,29 @@ __global__ void featurize(
 
     // printf("%d %d %d (%f, %f, %f)\n", mol_idx, local_atom_idx, num_atoms, i_x, i_y, i_z);
 
-    float *radial_feature_buffer_i = X_feat_out + g_atom_idx_i*TOTAL_FEATURE_SIZE + 0;
-    float *angular_feature_buffer_i = X_feat_out + g_atom_idx_i*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
+    // float *X_feat_i = X_feat_out + scatter_idxs[g_atom_idx_i];
+
+    // if(Atom)
+
+    float *X_feat_out_i;
+    if(g_atomic_num_i == 0) {
+        X_feat_out_i = X_feat_out_H;
+    } else if(g_atomic_num_i == 1) {
+        X_feat_out_i = X_feat_out_C;
+    } else if(g_atomic_num_i == 2) {
+        X_feat_out_i = X_feat_out_N;
+    } else {
+        X_feat_out_i = X_feat_out_O;
+    }
+  
+    float *radial_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + 0;
+    float *angular_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
 
     for(int j=0; j < num_atoms; j++) {
 
         int g_atom_idx_j = mol_offsets[mol_idx]+j;
+        int g_atomic_num_j = atomic_nums[g_atom_idx_j];
+
 
         float j_x = Xs[g_atom_idx_j];
         float j_y = Ys[g_atom_idx_j];
@@ -154,7 +207,21 @@ __global__ void featurize(
 
         float r_ij = dist_diff(d_ij_x, d_ij_y, d_ij_z);
 
-        float *radial_feature_buffer_j = X_feat_out + g_atom_idx_j*TOTAL_FEATURE_SIZE + 0;
+        // float *X_feat_j = X_feat_out + scatter_idxs[g_atom_idx_j];
+
+        float *X_feat_out_j;
+        if(g_atomic_num_j == 0) {
+            X_feat_out_j = X_feat_out_H;
+        } else if(g_atomic_num_j == 1) {
+            X_feat_out_j = X_feat_out_C;
+        } else if(g_atomic_num_j == 2) {
+            X_feat_out_j = X_feat_out_N;
+        } else {
+            X_feat_out_j = X_feat_out_O;
+        }
+
+        float *radial_feature_buffer_j = X_feat_out_j + scatter_idxs[g_atom_idx_j]*TOTAL_FEATURE_SIZE + 0;
+        // float *radial_feature_buffer_j = X_feat_j + g_atom_idx_j*TOTAL_FEATURE_SIZE + 0;
         // float *angular_feature_buffer_j = X_feat_out + g_atom_idx_j*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
 
 
@@ -195,7 +262,7 @@ __global__ void featurize(
                 float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
 
                 if(r_ik < A_Rc) {
-                    float theta_ijk = acos((d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik));
+                    float theta_ijk = acosf((d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik));
                     // printf("%d t_ijk: %f\n", local_atom_idx, theta_ijk);
                     float A_f_C_ik = f_C(r_ik, A_Rc);
                     for(int t=0; t < NUM_A_THETAS; t++) {
@@ -238,74 +305,163 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }   
 
-int main(void) {
+template <typename T>
+std::vector<int> sort_indexes(const std::vector<T> &v) {
 
-    auto X_obj = cnpy::npy_load("Xs.npy");
-    auto Y_obj = cnpy::npy_load("Ys.npy");
-    auto Z_obj = cnpy::npy_load("Zs.npy");
-    auto A_obj = cnpy::npy_load("As.npy");
+  // initialize original index locations
+  std::vector<int> idx(v.size());
+  iota(idx.begin(), idx.end(), 0);
 
-    auto MOs = cnpy::npy_load("MOs.npy");
-    auto MACs = cnpy::npy_load("MACs.npy");
+  // sort indexes based on comparing values in v
+  std::sort(idx.begin(), idx.end(),
+       [&v](int i1, int i2) {return v[i1] < v[i2];});
 
-    float *d_Xs = cudaMallocSimple<float>(X_obj.shape[0]);
-    float *d_Ys = cudaMallocSimple<float>(Y_obj.shape[0]);
-    float *d_Zs = cudaMallocSimple<float>(Z_obj.shape[0]);
-    int *d_As = cudaMallocSimple<int>(A_obj.shape[0]);
-    int *d_MOs = cudaMallocSimple<int>(MOs.shape[0]);
-    int *d_MACs = cudaMallocSimple<int>(MACs.shape[0]); // max
-
-    size_t n_atoms = X_obj.shape[0];
-    size_t n_mols  = MOs.shape[0];
-
-    float* d_X_feat;
-
-    printf("Total number of atoms: %d \n", n_atoms);
-
-    std::cout << "mallocing:" << n_atoms*TOTAL_FEATURE_SIZE*sizeof(float) << "bytes\n";
-
-    cudaMalloc(&d_X_feat, n_atoms*TOTAL_FEATURE_SIZE*sizeof(float)); 
-
-    auto start = Clock::now();
-
-    for(size_t i=0; i < 100; i++) {
-        std::cout << i << std::endl;    
-        cudaCopySimple(X_obj.data<float>(), X_obj.shape[0], d_Xs);
-        cudaCopySimple(Y_obj.data<float>(), Y_obj.shape[0], d_Ys);
-        cudaCopySimple(Z_obj.data<float>(), Z_obj.shape[0], d_Zs);
-        cudaCopySimple(A_obj.data<int>(), A_obj.shape[0], d_As);
-
-        cudaCopySimple(MOs.data<int>(), MOs.shape[0], d_MOs);
-        cudaCopySimple(MACs.data<int>(), MACs.shape[0], d_MACs); // max
-
-        assert(cudaMemset(d_X_feat, 0, n_atoms*TOTAL_FEATURE_SIZE*sizeof(float)) == 0);
-
-        std::cout << "n_mols" << n_mols << std::endl;
-
-        featurize<<<n_mols, 32>>>(
-            d_Xs,
-            d_Ys,
-            d_Zs,
-            d_As,
-            d_MOs,
-            d_MACs,
-            n_mols,
-            d_X_feat);
-
-
-        gpuErrchk( cudaPeekAtLastError() );
-
-        auto end = Clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-
-
-        std::cout << "DURATION:" << duration << std::endl;
-
-        std::cout << "samples per minute:" << (float(i*n_mols) / duration) * 60 * 1e9 << std::endl;
-
-    }
-
-    std::vector<float> X_feat(n_atoms*TOTAL_FEATURE_SIZE, 0);
-    cudaMemcpy(&X_feat[0], d_X_feat, n_atoms*TOTAL_FEATURE_SIZE*sizeof(int), cudaMemcpyDeviceToHost);
-
+  return idx;
 }
+
+// int main(void) {
+
+//     auto X_obj = cnpy::npy_load("Xs.npy");
+//     auto Y_obj = cnpy::npy_load("Ys.npy");
+//     auto Z_obj = cnpy::npy_load("Zs.npy");
+//     auto A_obj = cnpy::npy_load("As.npy");
+
+//     auto MOs = cnpy::npy_load("MOs.npy");
+//     auto MACs = cnpy::npy_load("MACs.npy");
+
+//     float *d_Xs = cudaMallocSimple<float>(X_obj.shape[0]);
+//     float *d_Ys = cudaMallocSimple<float>(Y_obj.shape[0]);
+//     float *d_Zs = cudaMallocSimple<float>(Z_obj.shape[0]);
+//     int *d_As = cudaMallocSimple<int>(A_obj.shape[0]);
+//     int *d_MOs = cudaMallocSimple<int>(MOs.shape[0]);
+//     int *d_MACs = cudaMallocSimple<int>(MACs.shape[0]); // max
+
+//     size_t n_total_atoms = X_obj.shape[0];
+//     size_t n_mols  = MOs.shape[0];
+
+
+//     int sort_num_items = n_total_atoms; // change to upperbound later, max number of atoms per block
+
+//     int *d_vals_in = cudaMallocSimple<int>(sort_num_items);
+//     int *sort_idxs = cudaMallocSimple<int>(sort_num_items);
+//     int *inv_idxs  = cudaMallocSimple<int>(sort_num_items);
+
+//     std::vector<int> idxs(sort_num_items);
+
+//     for(size_t i=0; i < sort_num_items; i++) {
+//         idxs[i] = i;
+//     }
+
+//     cudaCopySimple(&idxs[0], sort_num_items, d_vals_in);
+//     int *d_keys_out = cudaMallocSimple<int>(sort_num_items);
+//     void *d_temp_storage = NULL;
+//     size_t temp_storage_bytes = 0;
+
+//     // determine size requirements
+//     gpuErrchk(cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_As, d_keys_out, d_vals_in, sort_idxs, sort_num_items));
+//     gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes)) ;
+
+//     // SETUP DONE
+
+//     float* d_X_feat;
+
+//     printf("Total number of atoms: %d \n", n_total_atoms);
+
+//     std::cout << "mallocing:" << n_total_atoms*TOTAL_FEATURE_SIZE*sizeof(float) << "bytes\n";
+
+//     cudaMalloc(&d_X_feat, n_total_atoms*TOTAL_FEATURE_SIZE*sizeof(float)); 
+
+//     auto start = Clock::now();
+
+
+
+
+//     // int i=0;
+//     for(size_t i=0; i < 100000; i++) {
+
+//         int num_items = n_total_atoms; // upper bound this to a fixed num
+
+//         std::cout << i << std::endl;    
+//         cudaCopySimple(X_obj.data<float>(), X_obj.shape[0], d_Xs);
+//         cudaCopySimple(Y_obj.data<float>(), Y_obj.shape[0], d_Ys);
+//         cudaCopySimple(Z_obj.data<float>(), Z_obj.shape[0], d_Zs);
+//         cudaCopySimple(A_obj.data<int>(), A_obj.shape[0], d_As);
+
+//         cudaCopySimple(MOs.data<int>(), MOs.shape[0], d_MOs);
+//         cudaCopySimple(MACs.data<int>(), MACs.shape[0], d_MACs); // max
+
+//         assert(cudaMemset(d_X_feat, 0, n_total_atoms*TOTAL_FEATURE_SIZE*sizeof(float)) == 0);
+
+//         // atom type counters
+//         std::vector<int> counts(MAX_ATOM_TYPES, 0);
+
+//         for(size_t j=0; j < n_total_atoms; j++) {
+//             counts[A_obj.data<int>()[j]] += 1;
+//         }
+
+
+//         // 1. Sort by atom pairs.
+//         // 2. 
+
+//         // GPU
+//         gpuErrchk(cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_As, d_keys_out, d_vals_in, sort_idxs, sort_num_items));
+//         inverse<<<n_mols, 32>>>(sort_idxs, inv_idxs, sort_num_items); // invert
+//         gpuErrchk(cudaPeekAtLastError());
+
+
+
+//         // follow up with a segment reduce
+
+//         // std::vector<int> test(sort_num_items);
+//         // cudaMemcpy(&test[0], inv_idxs, n_total_atoms*sizeof(int), cudaMemcpyDeviceToHost);
+
+//         // for(auto v : test) {
+//         //     std::cout << v << " ";
+//         // }
+
+//         // return;
+
+
+
+//         // CPU
+//         // std::vector<int> buffer(A_obj.data<int>(), A_obj.data<int>() + A_obj.shape[0]);
+//         // std::vector<int> h_sort_idx = sort_indexes(buffer);
+//         // for(size_t k=0; k < sort_num_items; k++) {
+//         //     buffer[h_sort_idx[k]] = k;
+//         // }
+//         // cudaCopySimple(&buffer[0], sort_num_items, inv_idxs);
+
+
+//         //START
+//         featurize<<<n_mols, 32>>>(
+//             d_Xs,
+//             d_Ys,
+//             d_Zs,
+//             d_As,
+//             d_MOs,
+//             d_MACs,
+//             n_mols,
+//             inv_idxs,
+//             d_X_feat);
+
+
+//         gpuErrchk( cudaPeekAtLastError() );
+
+//         auto end = Clock::now();
+//         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+
+//         std::cout << "DURATION:" << duration << std::endl;
+
+//         std::cout << "samples per minute:" << (float((i+1)*n_mols) / duration) * 60 * 1e9 << std::endl;
+
+//     }
+
+//     std::vector<float> X_feat(n_total_atoms*TOTAL_FEATURE_SIZE, 0);
+//     cudaMemcpy(&X_feat[0], d_X_feat, n_total_atoms*TOTAL_FEATURE_SIZE*sizeof(int), cudaMemcpyDeviceToHost);
+
+
+
+
+
+// }

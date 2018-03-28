@@ -3,7 +3,7 @@ import os
 
 import sklearn
 
-from khan.data.dataset import RawDataset, FeaturizedDataset
+from khan.data.dataset import RawDataset
 import data_utils
 
 def load_calibration_file(calibration_file):
@@ -36,13 +36,13 @@ class DataLoader():
         calibration_file,
         ff_train_dir=None):
 
-        feat_dir_train = os.path.join(feat_dir, "train")
-        feat_dir_test = os.path.join(feat_dir, "test")
+        # feat_dir_train = os.path.join(feat_dir, "train")
+        # feat_dir_test = os.path.join(feat_dir, "test")
 
-        if os.path.exists(feat_dir):
-            fd_train = FeaturizedDataset(feat_dir_train)
-            fd_test = FeaturizedDataset(feat_dir_test)
-            return fd_train, fd_test
+        # if os.path.exists(feat_dir):
+        #     fd_train = FeaturizedDataset(feat_dir_train)
+        #     fd_test = FeaturizedDataset(feat_dir_test)
+        #     return fd_train, fd_test
 
         if self.prod:
             gdb_files = [
@@ -56,30 +56,42 @@ class DataLoader():
                 os.path.join(data_dir, "ani_gdb_s08.h5"),
             ]
         else:
-            gdb_files = [os.path.join(data_dir, "ani_gdb_s01.h5")]
+            gdb_files = [os.path.join(data_dir, "ani_gdb_s07.h5")]
+            # gdb_files = [os.path.join(data_dir, "ani_gdb_s08.h5")]
 
             Xs, ys = data_utils.load_hdf5_files(
                 gdb_files,
                 calibration_map=load_calibration_file(calibration_file),
                 use_fitted=self.use_fitted)
 
-        if ff_train_dir is not None:
-            ff_train_Xs, ff_train_ys = data_utils.load_ff_files(ff_train_dir, use_fitted=self.use_fitted)
-            Xs.extend(ff_train_Xs) # add training data here
-            ys.extend(ff_train_ys)
 
-        Xs, ys = sklearn.utils.shuffle(Xs, ys)    
+            # DEBUG
+            # return None, None
+
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
 
-        rd_train = RawDataset(X_train, y_train)
-        rd_test  = RawDataset(X_test,  y_test)
-        print("--------------train length", len(X_train))
-        fd_train = rd_train.featurize(self.batch_size, feat_dir_train)
-        print("--------------test length", len(X_test))
-        fd_test = rd_test.featurize(self.batch_size, feat_dir_test)
 
-        return fd_train, fd_test
+        return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+
+
+        # if ff_train_dir is not None:
+        #     ff_train_Xs, ff_train_ys = data_utils.load_ff_files(ff_train_dir, use_fitted=self.use_fitted)
+        #     Xs.extend(ff_train_Xs) # add training data here
+        #     ys.extend(ff_train_ys)
+
+        # Xs, ys = sklearn.utils.shuffle(Xs, ys)    
+
+        # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
+
+        # rd_train = RawDataset(X_train, y_train)
+        # rd_test  = RawDataset(X_test,  y_test)
+        # print("--------------train length", len(X_train))
+        # fd_train = rd_train.featurize(self.batch_size, feat_dir_train)
+        # print("--------------test length", len(X_test))
+        # fd_test = rd_test.featurize(self.batch_size, feat_dir_test)
+
+        # return fd_train, fd_test
 
     def load_gdb11(self,
         feat_dir,
@@ -96,8 +108,10 @@ class DataLoader():
         calibration_map=load_calibration_file(calibration_file),
         use_fitted=self.use_fitted)
 
-        rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
-        return rd_gdb11.featurize(self.batch_size, feat_dir)
+        return RawDataset(X_gdb11, y_gdb11)
+
+        # rd_gdb11  = RawDataset(X_gdb11, y_gdb11)
+        # return rd_gdb11.featurize(self.batch_size, feat_dir)
 
     def load_ff(self,
         feat_dir,

@@ -20,7 +20,17 @@ selfIxnNrgMO62x = np.array([
    -75.062826,
 ], dtype=np.float32)
 
+import pyximport
+pyximport.install()
+
+
+# import correction
 import correction
+import featurizer
+
+
+
+
 
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
@@ -216,6 +226,8 @@ def load_ff_files(ff_dir, use_fitted=False):
     return Xs, ys
 
 
+import time
+
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
@@ -242,10 +254,15 @@ def load_hdf5_files(
 
     """
 
+    # zs = []
     Xs = []
     ys = []
 
     print("Loading...")
+
+    start_time = time.time()
+
+    num_samples = 0
 
     for hdf5file in hdf5files:
         adl = pya.anidataloader(hdf5file)
@@ -279,7 +296,8 @@ def load_hdf5_files(
                     y = E[k] - js18pairwiseOffset + calibration_offset
 
                     ys.append(y)
-                    X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+                    X = featurizer.ANI1(R[k], Z)
+                    print(len(X))
                     Xs.append(X)
 
             else:
@@ -298,16 +316,63 @@ def load_hdf5_files(
                     # difference between the wb97_min and the mo62x_min
                     calibration_offset = min_atomization_mo62x - min_atomization_wb97
 
+
+
+                # print(R.shape, E.shape)
+
+                
+
+                # X = np.zeros((len(R)*len(Z)*384, ), np.float32)
+                # featurizer.ANI1_multi(R, Z, X)
+
+                # num_samples += len(R)
+
+                # print("samples per minute:", num_samples/(time.time()-start_time)*60)
+
+
+                # continue
+
+
+
+                # assert 0
+
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
-                        print("skipping")
+                        # print("skipping")
                         # assert 0
                         continue
                     y = E[k] - wb97offset + calibration_offset
-
                     ys.append(y)
+
                     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                     Xs.append(X)
+
+
+
+                    # X = np.zeros((len(Z)*384), np.float32)
+
+
+
+                    # # features = np.zeros((len(Z), 384))
+
+                    # # print(Z)
+                    # featurizer.ANI1(R[k], Z, X)
+
+                    # X = X.reshape(len(Z), 384)
+
+                    # # assert 0
+
+                    # # print(X[:64], X[64:])
+                    # # assert 0
+                    # Xs.append(X)
+                    # print(k)
+
+
+                    # if k > 10:
+                        # return Xs, ys
+                    # print(len(X))
+                    # X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+                    # Xs.append(X)
 
 
     # import matplotlib.mlab as mlab
