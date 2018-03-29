@@ -53,25 +53,25 @@ def main():
 
     args = parser.parse_args()
 
-    # cluster = tf.train.ClusterSpec({
-    #     "ps": ["localhost:5432"],
-    #     # "worker": ["localhost:5001", "localhost:5002"]
-    #     "worker": ["localhost:5001"]
-    # })
+    cluster = tf.train.ClusterSpec({
+        "ps": ["localhost:5432"],
+        # "worker": ["localhost:5001", "localhost:5002"]
+        "worker": ["localhost:5001"]
+    })
 
-    # if args.ps:
-    #     job_name = "ps"
-    # else:
-    #     job_name = "worker"
+    if args.ps:
+        job_name = "ps"
+    else:
+        job_name = "worker"
 
     args = parser.parse_args()
     print("Arguments", args)
 
-    # server = tf.train.Server(cluster, job_name=job_name, task_index=int(args.task_idx))
+    server = tf.train.Server(cluster, job_name=job_name, task_index=int(args.task_idx))
 
-    # if args.ps:
-        # server.join()
-        # sys.exit(0)
+    if args.ps:
+        server.join()
+        sys.exit(0)
 
     is_chief = int(args.task_idx) == 0
 
@@ -105,7 +105,132 @@ def main():
 
     batch_size = 1024
     
-    with tf.Session() as sess:
+    rd_gdb11 = data_loader.load_gdb11(data_dir_gdb11, ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
+    rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral"), ROTAMER_TEST_DIR)
+    rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral_ccsdt"), CCSDT_ROTAMER_TEST_DIR)
+    rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_charged"), CHARGED_ROTAMER_TEST_DIR)
+
+    eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
+    eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
+    eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
+
+    with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % int(args.task_idx),
+        cluster=cluster)):
+
+        trainer = Trainer.from_mnn_queue()
+        train_op_exp = trainer.get_train_op_exp()
+        loss_op = trainer.get_loss_op()
+        predict_op = trainer.model.predict_op()
+        max_norm_ops = trainer.get_maxnorm_ops()
+
+
+    with tf.train.MonitoredTrainingSession(
+        is_chief=is_chief,
+        master=server.target,
+        save_checkpoint_secs=10) as sess:
+
+        trainer.set_session(sess)
+
+        if is_chief:
+            trainer.initialize()
+
+        st = time.time()
+     
+        l2_losses = [trainer.l2]
+
+        print("Evaluating Rotamer Errors:")
+
+        # TODO: perf only if chief
+
+        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+            print(name, "{0:.2f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
+
+        max_local_epoch_count = 100
+
+        train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, train_op_exp]
+
+        best_test_score = trainer.eval_abs_rmse(rd_test)
+
+        print("------------Starting Training--------------")
+
+        start_time = time.time()
+
+        start_epoch = sess.run(trainer.global_step) // rd_train.num_batches(batch_size)
+
+        while sess.run(trainer.learning_rate) > 5e-10:
+
+            while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
+
+                sess.run(max_norm_ops)
+                train_results = trainer.feed_dataset(
+                    rd_train,
+                    shuffle=True,
+                    target_ops=train_ops,
+                    batch_size=batch_size)
+
+                global_epoch = train_results[0][0] // rd_train.num_batches(batch_size)
+                print("Avg time per epoch", (time.time() - start_time) / (global_epoch - start_epoch))
+
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+
+                learning_rate = train_results[0][1]
+                local_epoch_count = train_results[0][2]
+
+                test_abs_rmse = trainer.eval_abs_rmse(rd_test)
+                print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
+                    'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
+                    'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+
+                if test_abs_rmse < best_test_score:
+                    trainer.save_best_params()
+                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                        print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                            "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+
+                    # local_epoch_count = 0
+                    best_test_score = test_abs_rmse
+                    sess.run(trainer.reset_local_epoch_count)
+                else:
+                    sess.run(trainer.incr_local_epoch_count)
+
+                # trainer.save(save_dir)
+
+                print('', end='\n')
+
+            sess.run(trainer.decr_learning_rate)
+            sess.run(trainer.reset_local_epoch_count)
+            trainer.load_best_params()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # with tf.Session() as sess:
+
+    with tf.train.MonitoredTrainingSession(
+        is_chief=is_chief,
+        master=server.target,
+        save_checkpoint_secs=10) as sess:
 
         trainer = Trainer.from_mnn_queue(sess)
         target_ops = [trainer.model.predict_op()]
@@ -114,7 +239,7 @@ def main():
             trainer.learning_rate,
             trainer.local_epoch_count,
             trainer.l2,
-            trainer.get_train_op_rmse()
+            trainer.get_train_op_exp()
         ]
         trainer.initialize()
 
@@ -242,7 +367,7 @@ def main():
 
                 if test_abs_rmse < best_test_score:
                     # trainer.save_best_params()
-                    # gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
+                    # gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     # print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                     # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
                     #     print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
@@ -276,14 +401,14 @@ def main():
 
 
 
-    fd_gdb11 = data_loader.load_gdb11(data_dir_gdb11, ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
-    fd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral"), ROTAMER_TEST_DIR)
-    fd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral_ccsdt"), CCSDT_ROTAMER_TEST_DIR)
-    fd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_charged"), CHARGED_ROTAMER_TEST_DIR)
+    rd_gdb11 = data_loader.load_gdb11(data_dir_gdb11, ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
+    rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral"), ROTAMER_TEST_DIR)
+    rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral_ccsdt"), CCSDT_ROTAMER_TEST_DIR)
+    rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_charged"), CHARGED_ROTAMER_TEST_DIR)
 
     eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
     eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
-    eval_datasets = [fd_ffneutral_mo62x, fd_ffneutral_ccsdt, fd_ffcharged_mo62x]
+    eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
 
     # sess = tf.Session()
 
@@ -335,7 +460,7 @@ def main():
 
         start_time = time.time()
 
-        start_epoch = sess.run(trainer.global_step) // fd_train.num_batches()
+        start_epoch = sess.run(trainer.global_step) // rd_train.num_batches()
 
         while sess.run(trainer.learning_rate) > 5e-10:
 
@@ -343,11 +468,11 @@ def main():
 
                 sess.run(max_norm_ops)
                 train_results = trainer.feed_dataset(
-                    fd_train,
+                    rd_train,
                     shuffle=True,
                     target_ops=train_ops)
 
-                global_epoch = train_results[0][0] // fd_train.num_batches()
+                global_epoch = train_results[0][0] // rd_train.num_batches()
                 print("Avg time per epoch", (time.time() - start_time) / (global_epoch - start_epoch))
                 # start_time = time.time()
 
@@ -368,7 +493,7 @@ def main():
 
                 if test_abs_rmse < best_test_score:
                     # trainer.save_best_params()
-                    # gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
+                    # gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     # print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                     # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
                     #     print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
@@ -393,7 +518,7 @@ def main():
 
     # tot_time = time.time() - st # this logic is a little messed up
 
-    # tpm = tot_time/(fd_train.num_batches()*batch_size*num_epochs*3)
+    # tpm = tot_time/(rd_train.num_batches()*batch_size*num_epochs*3)
     # print("Time Per Mol:", tpm, "seconds")
     # print("Samples per minute:", 60/tpm)
 
