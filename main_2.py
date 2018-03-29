@@ -103,24 +103,164 @@ def main():
 
     rd_train, rd_test = data_loader.load_gdb8(ANI_WORK_DIR, ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
 
+    batch_size = 1024
+    
     with tf.Session() as sess:
 
-        print("FOO")
-
         trainer = Trainer.from_mnn_queue(sess)
-
         target_ops = [trainer.model.predict_op()]
-
-        train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, trainer.get_train_op_exp()]
-
+        train_ops = [
+            trainer.global_step,
+            trainer.learning_rate,
+            trainer.local_epoch_count,
+            trainer.l2,
+            trainer.get_train_op_rmse()
+        ]
         trainer.initialize()
 
-        print("FEED START")
 
-        train_results = trainer.feed_dataset(
-            rd_train,
-            shuffle=True,
-            target_ops=target_ops)
+        # f0_debugs = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.f0_debug,
+        #     batch_size=batch_size)
+
+        # # return
+
+        # rmses = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.rmse,
+        #     batch_size=batch_size)
+
+        # f1_debugs = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.f1_debug,
+        #     batch_size=batch_size)
+
+        # f2_debugs = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.f2_debug,
+        #     batch_size=batch_size)
+
+        # f3_debugs = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.f3_debug,
+        #     batch_size=batch_size)
+        
+        # res = trainer.feed_dataset(
+        #     rd_test,
+        #     shuffle=False,
+        #     target_ops=trainer.W_grads,
+        #     # target_ops=trainer.rmse,
+        #     batch_size=batch_size)
+
+
+        # for b_idx, rr in enumerate(res):
+        #     for r in rr:
+        #         if np.any(np.isnan(r)) or np.any(np.isinf(r)):
+        #             print("b_idx", b_idx)
+        #             print("r", r)
+        #             print("rmses", rmses[b_idx])
+        #             print("f0_debugs", f0_debugs[b_idx])
+
+
+        #             print(np.any(np.isnan(f0_debugs[b_idx])) or np.any(np.isinf(f0_debugs[b_idx])))
+        #             print(np.any(np.isnan(f1_debugs[b_idx])) or np.any(np.isinf(f1_debugs[b_idx])))
+        #             print(np.any(np.isnan(f2_debugs[b_idx])) or np.any(np.isinf(f2_debugs[b_idx])))
+        #             print(np.any(np.isnan(f3_debugs[b_idx])) or np.any(np.isinf(f3_debugs[b_idx])))
+
+           
+        #             return
+        #             assert 0
+
+        # assert 0
+
+        # for r in train_results:
+        #     print(r)
+
+        # assert 0
+        #     if np.any(np.isnan(r)):
+        #         for a in r:
+        #             print(a)
+        #         assert 0
+
+            # print(r)
+
+        # if np.any(np.isnan(test_results[0])):
+            # print("NaNs detected in initial results")
+ 
+        # assert 0
+
+        best_test_score = trainer.eval_abs_rmse(rd_test)
+
+        print("BEST_TEST_SCORE", best_test_score, "\n")
+
+        max_norm_ops = trainer.get_maxnorm_ops()
+
+
+        print("------------Starting Training--------------")
+
+        start_time = time.time()
+
+        start_epoch = sess.run(trainer.global_step) // rd_train.num_batches(batch_size)
+
+        max_local_epoch_count = 100
+
+        while sess.run(trainer.learning_rate) > 5e-10:
+
+            while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
+
+                sess.run(max_norm_ops)
+                train_results = trainer.feed_dataset(
+                    rd_train,
+                    shuffle=True,
+                    target_ops=train_ops,
+                    batch_size=batch_size)
+
+                global_epoch = train_results[0][0] // rd_train.num_batches(batch_size)
+                print("Avg time per epoch", (time.time() - start_time) / (global_epoch - start_epoch))
+                # start_time = time.time()
+
+                ## DEBUG CONTINUE
+
+                # continue
+                ## DEBUG
+
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+
+                learning_rate = train_results[0][1]
+                local_epoch_count = train_results[0][2]
+
+                test_abs_rmse = trainer.eval_abs_rmse(rd_test)
+                print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
+                    'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
+                    'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+
+                if test_abs_rmse < best_test_score:
+                    # trainer.save_best_params()
+                    # gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
+                    # print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                    #     print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                    #         "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+
+                    # local_epoch_count = 0
+                    best_test_score = test_abs_rmse
+                    sess.run(trainer.reset_local_epoch_count)
+                else:
+                    sess.run(trainer.incr_local_epoch_count)
+
+                # trainer.save(save_dir)
+
+                print('', end='\n')
+
+            sess.run(trainer.decr_learning_rate)
+            sess.run(trainer.reset_local_epoch_count)
+            trainer.load_best_params()
 
 
 
@@ -188,7 +328,7 @@ def main():
 
         train_ops = [trainer.global_step, trainer.learning_rate, trainer.local_epoch_count, trainer.l2, train_op_exp]
 
-        best_test_score = trainer.eval_abs_rmse(fd_test)
+        best_test_score = trainer.eval_abs_rmse(rd_test)
 
  
         print("------------Starting Training--------------")
@@ -221,18 +361,18 @@ def main():
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
 
-                test_abs_rmse = trainer.eval_abs_rmse(fd_test)
+                test_abs_rmse = trainer.eval_abs_rmse(rd_test)
                 print(time.strftime("%Y-%m-%d %H:%M"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
                     'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 if test_abs_rmse < best_test_score:
-                    trainer.save_best_params()
-                    gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
-                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-                    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                        print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
-                            "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+                    # trainer.save_best_params()
+                    # gdb11_abs_rmse = trainer.eval_abs_rmse(fd_gdb11)
+                    # print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                    #     print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                    #         "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
 
                     # local_epoch_count = 0
                     best_test_score = test_abs_rmse

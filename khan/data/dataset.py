@@ -59,14 +59,14 @@ class RawDataset():
                 mol_ids.extend([local_idx]*len(mol))
 
             mol_Xs = np.concatenate(mol_Xs, axis=0)
-            mol_ys = None
+            mol_yts = None
 
             if self.all_ys:
-                mol_ys = []
+                mol_yts = []
                 for p_idx in perm[s_m_idx:e_m_idx]:
-                    mol_ys.append(self.all_ys[p_idx])
+                    mol_yts.append(self.all_ys[p_idx])
 
-            yield mol_Xs, mol_ids, mol_ys
+            yield mol_Xs, mol_ids, mol_yts
 
 #     def iterate(self, batch_size):
 

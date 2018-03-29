@@ -149,11 +149,6 @@ __global__ void featurize(
     int local_atom_idx = threadIdx.x; // local_local_atom_idx
     int num_atoms = mol_atom_count[blockIdx.x];
 
-
-    // perform a bitonic sort on sort indices
-
-    // printf("num_atoms %d \n", num_atoms);
-
     if (local_atom_idx >= num_atoms) {
         return;
     }
@@ -230,9 +225,24 @@ __global__ void featurize(
             for(int r_idx = 0; r_idx < NUM_R_Rs; r_idx++) {
                 float summand = expf(-R_eta * powf(r_ij - R_Rs[r_idx], 2.0)) * f_C(r_ij, R_Rc);
 
+
+
                 // exploit symmetry of the atomic adds
-                atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
-                atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
+                auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
+                auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
+            
+                if(isnan(res1) || isinf(res1)) {
+                    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
+                    // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                        // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                }
+
+                if(isnan(res2) || isinf(res2)) {
+                    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
+                    // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                        // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                }
+
             }
         }
 
@@ -240,7 +250,7 @@ __global__ void featurize(
 
         if(r_ij < A_Rc) {
 
-            for(size_t k=0; k < num_atoms; k++) {
+            for(size_t k=j+1; k < num_atoms; k++) {
 
                 if(local_atom_idx == j || local_atom_idx == k || j == k) {
                     continue;
@@ -262,13 +272,37 @@ __global__ void featurize(
                 float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
 
                 if(r_ik < A_Rc) {
-                    float theta_ijk = acosf((d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik));
+
+                    // TODO(YTZ): replace with arctan2 trick
+
+                    float inner = (d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik);
+                    inner = fmaxf(inner, -1.0);
+                    inner = fminf(inner,  1.0);
+
+                    // printf("INNER %f\n", inner);
+
+                    float theta_ijk = acosf(inner);
+
+                    // super useful debug
+                    if(isnan(theta_ijk) || isinf(theta_ijk)) {
+                        printf("WTF NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                            g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                    }
+
                     // printf("%d t_ijk: %f\n", local_atom_idx, theta_ijk);
                     float A_f_C_ik = f_C(r_ik, A_Rc);
                     for(int t=0; t < NUM_A_THETAS; t++) {
                         for(int s=0; s < NUM_A_RS; s++) {
-                            float summand = 2*(1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
-                            atomicAdd(angular_feature_buffer_i + linearize(an_i, an_j, t, s), summand);
+                            // (TODO: ytz) do 2*(1-A_Zeta) at the end
+                            float summand = powf(2, 1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
+                            // printf("summand: %f, \n", summand);
+                            auto res = atomicAdd(angular_feature_buffer_i + linearize(an_i, an_j, t, s), summand);
+
+
+                            if(isnan(res) || isinf(res)) {
+                                printf("WTF ANGULAR SUMMAND NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                                    g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                            }
                         }
                     }     
                 }

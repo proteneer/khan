@@ -100,6 +100,10 @@ class Trainer():
             yt_enq,
             put_op,
             session,
+            f0,
+            f1,
+            f2,
+            f3
         )
 
     def set_session(self, sess):
@@ -136,7 +140,11 @@ class Trainer():
         m_enq,
         yt_enq,
         put_op,
-        sess):
+        sess,
+        f0_debug=None,
+        f1_debug=None,
+        f2_debug=None,
+        f3_debug=None):
         """
         Model for full end-to-end.
         """
@@ -145,7 +153,11 @@ class Trainer():
         self.best_params = []
         self.save_best_params_ops = []
         self.load_best_params_ops = []
-        self.global_initializer_op = tf.global_variables_initializer()
+
+        self.f0_debug = f0_debug
+        self.f1_debug = f1_debug
+        self.f2_debug = f2_debug
+        self.f3_debug = f3_debug
 
         for var in tf.trainable_variables():
 
@@ -172,22 +184,24 @@ class Trainer():
         self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
         self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
+        # debug
+        self.W_grads = tf.gradients(self.rmse, self.weight_matrices())
+        self.b_grads = tf.gradients(self.rmse, self.biases())
         # self.best_loss = tf.get_variable('best_loss', tuple(), tf.float32, tf.constant_initializer(9.99e9), trainable=False)
 
-        # self.optimizer_rmse = tf.train.AdamOptimizer(
-        #     learning_rate=self.learning_rate,
-        #     beta1=0.9,
-        #     beta2=0.999,
-        #     epsilon=1e-8) # change defaults
-        # # todo: add a step for max normalization
-        # self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse)
+        self.optimizer_rmse = tf.train.AdamOptimizer(
+            learning_rate=self.learning_rate,
+            beta1=0.9,
+            beta2=0.999,
+            epsilon=1e-8) # change defaults
+        # todo: add a step for max normalization
+        self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse, global_step=self.global_step)
         self.optimizer_exp = tf.train.AdamOptimizer(
             learning_rate=self.learning_rate,
             beta1=0.9,
             beta2=0.999,
             epsilon=1e-8) # change defaults
         self.train_op_exp = self.optimizer_exp.minimize(self.exp_loss, global_step=self.global_step)
-
 
         # maxnorm
         ws = self.weight_matrices()
@@ -208,6 +222,8 @@ class Trainer():
 
         # ytz: finalized - so the saver needs to be at the end when all vars have been created.
         # (though not necessarily initialized)
+
+        self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
         
 
@@ -238,37 +254,38 @@ class Trainer():
     def get_loss_op(self):
         return self.exp_loss
 
-    def eval_abs_rmse(self, dataset):
-        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2])
+    def eval_abs_rmse(self, dataset, batch_size=1024):
+        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
-    def eval_eh_rmse(self, dataset, group_ys):
-        ys = self.feed_dataset(dataset, shuffle=False, target_ops=[self.model.predict_op()])
+    def eval_eh_rmse(self, dataset, group_ys, batch_size=1024):
+        ys = self.feed_dataset(dataset, shuffle=False, target_ops=[self.model.predict_op()], batch_size=batch_size)
         return ed_harder_rmse(group_ys, flatten_results(ys)) * HARTREE_TO_KCAL_PER_MOL
 
     def feed_dataset(self,
         dataset,
         shuffle,
-        target_ops):
+        target_ops,
+        batch_size):
 
-        batch_size = 1024
+        # batch_size = 1024
 
         st = time.time()
 
         print("num_batches:", dataset.num_batches(batch_size=batch_size))
 
         def submitter():
-            for b_idx, (mol_xs, mol_idxs, mol_ys) in enumerate(dataset.iterate_advanced(batch_size=batch_size, shuffle=shuffle)):
-                # print("MOL INDICES", mol_idxs)
+            for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate_advanced(batch_size=batch_size, shuffle=shuffle)): # FIX SHUFFLE TO SHUFFLE
+
                 try:
-                    # print("feeding...")
+                    # print("feeding...", b_idx)
                     self.sess.run(self.put_op, feed_dict={
                         self.x_enq: mol_xs[:, 1],
                         self.y_enq: mol_xs[:, 2],
                         self.z_enq: mol_xs[:, 3],
                         self.a_enq: mol_xs[:, 0].astype(np.int32),
                         self.m_enq: mol_idxs,
-                        self.yt_enq: mol_ys,
+                        self.yt_enq: mol_yts,
                     })
                 except Exception as e:
                     print("EEEEE", e)
@@ -279,9 +296,10 @@ class Trainer():
         results = []
 
         for i in range(dataset.num_batches(batch_size=batch_size)):
+            # print("running...", i)
             res = self.sess.run(target_ops)
             
-            print("samples_per_minute:", ((i+1)*batch_size)/(time.time()-st) * 60)
+            # print("samples_per_minute:", ((i+1)*batch_size)/(time.time()-st) * 60)
             results.append(res)
 
 

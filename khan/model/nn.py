@@ -78,8 +78,9 @@ def mnn_staging():
     z_enq = tf.placeholder(dtype=tf.float32)
     a_enq = tf.placeholder(dtype=tf.int32)
     m_enq = tf.placeholder(dtype=tf.int32)
-    y_enq = tf.placeholder(dtype=tf.float32)
+    y_trues = tf.placeholder(dtype=tf.float32)
 
+    # (YTZ) FIX ME RESET CAPCITY TO 10
     staging = tf.contrib.staging.StagingArea(
         capacity=10, dtypes=[
             tf.float32,  # Xs
@@ -87,14 +88,14 @@ def mnn_staging():
             tf.float32,  # Zs
             tf.int32,  # As
             tf.int32,    # mol ids
-            tf.float32   # Ys
+            tf.float32   # Y TRUEss
         ])
 
             # tf.int32,    # MOs
             # tf.int32,    # MANs
             # tf.float32]) # MIDs
 
-    put_op = staging.put([x_enq, y_enq, z_enq, a_enq, m_enq, y_enq])
+    put_op = staging.put([x_enq, y_enq, z_enq, a_enq, m_enq, y_trues])
     get_op = staging.get()
 
     # feat_size = 768
@@ -102,7 +103,7 @@ def mnn_staging():
     # f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
 
     return [
-        (x_enq,     y_enq,     z_enq,     a_enq,     m_enq,     y_enq ),
+        (x_enq,     y_enq,     z_enq,     a_enq,     m_enq,     y_trues ),
         (get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]),
         put_op
     ]

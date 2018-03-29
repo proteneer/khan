@@ -139,12 +139,14 @@ class AniOp : public OpKernel {
       &gather_idxs)
     );
 
+    gpuErrchk(cudaMemset(X_feat_H->flat<float>().data(), 0, host_A_counts[0]*384*sizeof(float)));
+    gpuErrchk(cudaMemset(X_feat_C->flat<float>().data(), 0, host_A_counts[1]*384*sizeof(float)));
+    gpuErrchk(cudaMemset(X_feat_N->flat<float>().data(), 0, host_A_counts[2]*384*sizeof(float)));
+    gpuErrchk(cudaMemset(X_feat_O->flat<float>().data(), 0, host_A_counts[3]*384*sizeof(float)));
 
     Tensor tmp;
 
     size_t tmp_storage_bytes;
-
-
 
     Tensor sort_idxs_in; // used for both local and global
     OP_REQUIRES_OK(context, context->allocate_temp(
@@ -239,8 +241,6 @@ class AniOp : public OpKernel {
       total_num_atoms));
 
     const GPUDevice &d = context->eigen_device<GPUDevice>();
-
-
 
     std::vector<int> host_sort_global_idxs(total_num_atoms);
 

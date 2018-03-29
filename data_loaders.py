@@ -56,7 +56,7 @@ class DataLoader():
                 os.path.join(data_dir, "ani_gdb_s08.h5"),
             ]
         else:
-            gdb_files = [os.path.join(data_dir, "ani_gdb_s07.h5")]
+            gdb_files = [os.path.join(data_dir, "ani_gdb_s04.h5")]
             # gdb_files = [os.path.join(data_dir, "ani_gdb_s08.h5")]
 
             Xs, ys = data_utils.load_hdf5_files(
@@ -69,7 +69,7 @@ class DataLoader():
             # return None, None
 
 
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
+        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
 
 
         return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
