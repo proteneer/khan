@@ -41,6 +41,7 @@ class RawDataset():
     def iterate_advanced(self, batch_size, shuffle=True):
 
         perm = np.arange(len(self.all_Xs))
+        perm = np.zeros(len(self.all_Xs), dtype=np.int32) # test convergence
         if shuffle:
             np.random.shuffle(perm)
 
@@ -54,6 +55,7 @@ class RawDataset():
             mol_ids = []
 
             for local_idx, p_idx in enumerate(perm[s_m_idx:e_m_idx]):
+                # print("p_idx", p_idx)
                 mol = self.all_Xs[p_idx]
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
@@ -65,6 +67,8 @@ class RawDataset():
                 mol_yts = []
                 for p_idx in perm[s_m_idx:e_m_idx]:
                     mol_yts.append(self.all_ys[p_idx])
+
+            # print("yielding", mol_Xs[0])
 
             yield mol_Xs, mol_ids, mol_yts
 

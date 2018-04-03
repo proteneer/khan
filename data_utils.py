@@ -316,26 +316,6 @@ def load_hdf5_files(
                     # difference between the wb97_min and the mo62x_min
                     calibration_offset = min_atomization_mo62x - min_atomization_wb97
 
-
-
-                # print(R.shape, E.shape)
-
-                
-
-                # X = np.zeros((len(R)*len(Z)*384, ), np.float32)
-                # featurizer.ANI1_multi(R, Z, X)
-
-                # num_samples += len(R)
-
-                # print("samples per minute:", num_samples/(time.time()-start_time)*60)
-
-
-                # continue
-
-
-
-                # assert 0
-
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
                         # print("skipping")
@@ -348,41 +328,5 @@ def load_hdf5_files(
                     Xs.append(X)
 
 
-
-                    # X = np.zeros((len(Z)*384), np.float32)
-
-
-
-                    # # features = np.zeros((len(Z), 384))
-
-                    # # print(Z)
-                    # featurizer.ANI1(R[k], Z, X)
-
-                    # X = X.reshape(len(Z), 384)
-
-                    # # assert 0
-
-                    # # print(X[:64], X[64:])
-                    # # assert 0
-                    # Xs.append(X)
-                    # print(k)
-
-
-                    # if k > 10:
-                        # return Xs, ys
-                    # print(len(X))
-                    # X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
-                    # Xs.append(X)
-
-
-    # import matplotlib.mlab as mlab
-    # import matplotlib.pyplot as plt
-
-    # print(np.max(ys), np.min(ys))
-
-    # n, bins, patches = plt.hist(ys, 600, facecolor='green', alpha=0.75)
-    # plt.show()
-
-    # assert 0
 
     return Xs, ys

@@ -37,15 +37,11 @@ class AtomNN():
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            # with tf.device(tf.train.replica_device_setter(cluster=cluster_spec)):
+            # with tf.device('/cpu:0'):
 
-            with tf.device('/cpu:0'):
-
-                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
-                b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
-
-                # print("Created", W.name, b.name, "in var scope", tf.get_variable_scope())
-
+            print("W"+name, "b"+name)
+            W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
+            b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
 
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:

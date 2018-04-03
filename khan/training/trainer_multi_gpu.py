@@ -37,6 +37,9 @@ def average_gradients(tower_grads):
     """
     average_grads = []
     for grad_and_vars in zip(*tower_grads):
+
+        print(grad_and_vars)
+
         grads = []
 
         for g, _ in grad_and_vars:
@@ -56,7 +59,8 @@ def average_gradients(tower_grads):
         v = grad_and_vars[0][1]
         grad_and_var = (grad, v)
         average_grads.append(grad_and_var)
-        return average_grads
+
+    return average_grads
 
 
 class TrainerMultiGPU():
@@ -128,7 +132,15 @@ class TrainerMultiGPU():
 
         with tf.device('/cpu:0'):
 
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(0.001), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False)
+
+
+            # lr = tf.train.exponential_decay(
+                                    # global_step,
+                                    # decay_steps,
+                                    # cifar10.LEARNING_RATE_DECAY_FACTOR,
+                                    # staircase=True)
+
             self.optimizer = tf.train.AdamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -147,10 +159,12 @@ class TrainerMultiGPU():
             # self.W_grads = tf.gradients(self.rmse, self.weight_matrices())
             # self.b_grads = tf.gradients(self.rmse, self.biases())
 
-            all_grads = [] # do something similar for all L2s, etc.
+            self.all_grads = [] # do something similar for all L2s, etc.
             self.all_preds = []
             self.all_l2s = []
             self.all_models = []
+            self.tower_exp_loss = []
+            self.tower_grads = []
 
             with tf.variable_scope(tf.get_variable_scope()):
                 for i in range(self.num_gpus):
@@ -201,17 +215,30 @@ class TrainerMultiGPU():
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
                             tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
 
-                            tf.get_variable_scope().reuse_variables()
+                            # tf.get_variable_scope().reuse_variables()
+                            self.tower_exp_loss.append(tower_exp_loss)
+
+
 
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
+                            self.all_grads.append(tower_grad)
+            # self.train_op = self.optimizer.minimize(self.tower_exp_loss[0], global_step=self.global_step)
 
-                            all_grads.append(tower_grad)
 
-            grads = average_gradients(all_grads)
-            apply_gradient_op = self.optimizer.apply_gradients(grads, global_step=self.global_step)
-            variable_averages = tf.train.ExponentialMovingAverage(0.9, self.global_step)
-            variables_averages_op = variable_averages.apply(tf.trainable_variables())
-            self.train_op = tf.group(apply_gradient_op, variables_averages_op)
+
+
+
+
+            # grads = average_gradients(self.all_grads)
+
+            apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.all_grads), global_step=self.global_step)
+            # apply_gradient_op = self.optimizer.apply_gradients(self.all_grads[0], global_step=self.global_step)
+
+            self.train_op = apply_gradient_op
+
+            # variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
+            # variables_averages_op = variable_averages.apply(tf.trainable_variables())
+            # self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
         ws = self.weight_matrices()
         max_norm_ops = []
@@ -244,93 +271,6 @@ class TrainerMultiGPU():
  
 
         return
-
-
-
-        # mnn = MoleculeNN(
-        #     type_map=["H", "C", "N", "O"],
-        #     atom_type_features=[f0, f1, f2, f3],
-        #     gather_idxs=gi,
-        #     mol_idxs=m_deq,
-        #     layer_sizes=(384, 256, 128, 64, 1))
-
-        # self.sess = sess
-        # self.model = model
-        # self.best_params = []
-        # self.save_best_params_ops = []
-        # self.load_best_params_ops = []
-
-        # self.f0_debug = f0_debug
-        # self.f1_debug = f1_debug
-        # self.f2_debug = f2_debug
-        # self.f3_debug = f3_debug
-
-        # for var in tf.trainable_variables():
-
-        #     copy_name = "best_"+var.name.split(":")[0]
-        #     copy_shape = var.shape
-        #     copy_type = var.dtype
-
-        #     var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
-
-        #     self.best_params.append(var_copy)
-        #     self.save_best_params_ops.append(tf.assign(var_copy, var))
-        #     self.load_best_params_ops.append(tf.assign(var, var_copy))
-
-        # self.l2 = tf.squared_difference(self.model.predict_op(), labels)
-        # self.rmse = tf.sqrt(tf.reduce_mean(self.l2))
-
-        # self.exp_loss = tf.exp(tf.cast(self.rmse, dtype=tf.float64))
-        # self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(0.001), trainable=False)
-        # self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.1))
-
-        # self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-
-        # self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
-        # self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
-
-        # # debug
-        # self.W_grads = tf.gradients(self.rmse, self.weight_matrices())
-        # self.b_grads = tf.gradients(self.rmse, self.biases())
-        # # self.best_loss = tf.get_variable('best_loss', tuple(), tf.float32, tf.constant_initializer(9.99e9), trainable=False)
-
-        # self.optimizer_rmse = tf.train.AdamOptimizer(
-        #     learning_rate=self.learning_rate,
-        #     beta1=0.9,
-        #     beta2=0.999,
-        #     epsilon=1e-8) # change defaults
-        # # todo: add a step for max normalization
-        # self.train_op_rmse = self.optimizer_rmse.minimize(self.rmse, global_step=self.global_step)
-        # self.optimizer_exp = tf.train.AdamOptimizer(
-        #     learning_rate=self.learning_rate,
-        #     beta1=0.9,
-        #     beta2=0.999,
-        #     epsilon=1e-8) # change defaults
-        # self.train_op_exp = self.optimizer_exp.minimize(self.exp_loss, global_step=self.global_step)
-
-        # # maxnorm
-        # ws = self.weight_matrices()
-        # max_norm_ops = []
-
-        # for w in ws:
-        #     max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
-
-        # self.max_norm_ops = max_norm_ops
-
-        # self.x_enq = x_enq
-        # self.y_enq = y_enq
-        # self.z_enq = z_enq
-        # self.a_enq = a_enq
-        # self.m_enq = m_enq
-        # self.yt_enq = yt_enq
-        # self.put_op = put_op
-
-        # # ytz: finalized - so the saver needs to be at the end when all vars have been created.
-        # # (though not necessarily initialized)
-
-        # self.global_initializer_op = tf.global_variables_initializer()
-        # self.saver = tf.train.Saver()
-        
 
 
     def weight_matrices(self):
@@ -408,11 +348,11 @@ class TrainerMultiGPU():
         results = []
         n_batches = dataset.num_batches(batch_size=batch_size)
         for i in range(n_batches):
-            # print("running...", i*self.num_gpus)
             res = self.sess.run(target_ops)
+            # print(res)
+            if len(target_ops) == 5:
+                print("batch rmse:", np.sqrt(np.mean(res[3])))
 
-            # if i % 100 == 0:
-                # print("samples_per_minute:", ((i+1)*batch_size*self.num_gpus)/(time.time()-st) * 60)
             results.append(res)
 
 

@@ -62,9 +62,9 @@ class DataLoader():
                 os.path.join(data_dir, "ani_gdb_s01.h5"),
                 os.path.join(data_dir, "ani_gdb_s02.h5"),
                 os.path.join(data_dir, "ani_gdb_s03.h5"),
-                os.path.join(data_dir, "ani_gdb_s04.h5"),
-                os.path.join(data_dir, "ani_gdb_s05.h5"),
-                os.path.join(data_dir, "ani_gdb_s06.h5"),
+                # os.path.join(data_dir, "ani_gdb_s04.h5"),
+                # os.path.join(data_dir, "ani_gdb_s05.h5"),
+                # os.path.join(data_dir, "ani_gdb_s06.h5"),
                 # os.path.join(data_dir, "ani_gdb_s07.h5"),
                 # os.path.join(data_dir, "ani_gdb_s08.h5"),
             ]
@@ -78,6 +78,10 @@ class DataLoader():
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
         # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
+
+        print(np.amax(y_train), np.amin(y_train), np.mean(y_train), np.std(y_train))
+        # for y in y_train:
+            # print(y)
 
 
         return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
