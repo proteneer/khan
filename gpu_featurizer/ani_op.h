@@ -2,10 +2,10 @@
 #ifndef ANI_OP_H_
 #define ANI_OP_H_
 
-template <typename Device, typename T>
-struct AniFunctor {
-  void operator()(const Device& d, int size, const T* in, T* out);
-};
+// template <typename Device, typename T>
+// struct AniFunctor {
+//   void operator()(const Device& d, int size, const T* in, T* out);
+// };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.

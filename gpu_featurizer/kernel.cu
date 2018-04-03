@@ -3,6 +3,8 @@
 #include <vector>
 #include <chrono>
 
+// follow instructions on building tensorflow plugins
+
 // #include "cnpy.h" // utility for reading numpy .npy files.
 
 #include <cub/cub.cuh>
@@ -296,6 +298,8 @@ __global__ void featurize(
                             // (TODO: ytz) do 2*(1-A_Zeta) at the end
                             float summand = powf(2, 1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
                             // printf("summand: %f, \n", summand);
+                            // printf("scatter_idxs[g_atom_idx_i]: %d, linearize: %d\n", scatter_idxs[g_atom_idx_i], linearize(an_i, an_j, t, s));
+
                             auto res = atomicAdd(angular_feature_buffer_i + linearize(an_i, an_j, t, s), summand);
 
 

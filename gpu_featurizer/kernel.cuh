@@ -18,6 +18,19 @@ __global__ void featurize(
     float *X_feat_out_N,
     float *X_feat_out_O);
 
+__global__ void initialize(
+    float *array,
+    float val,
+    int n_elems) {
+
+    int elem_idx = blockDim.x*blockIdx.x + threadIdx.x;
+
+    if(elem_idx < n_elems) {
+        array[elem_idx] = val;
+    }
+
+};
+
 __global__ void inverse(
     const int *sort_idxs,
     int *gather_idxs,

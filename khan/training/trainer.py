@@ -66,11 +66,10 @@ class Trainer():
         cls,
         session=None):
 
-        (x_enq, y_enq, z_enq, a_enq, m_enq, yt_enq), \
-        (x_deq, y_deq, z_deq, a_deq, m_deq, labels), \
+        (x_enq, y_enq, z_enq, a_enq, si_enq, gi_enq, m_enq, yt_enq), \
+        (x_deq, y_deq, z_deq, a_deq, si_deq, gi_deq, m_deq, labels), \
         put_op = mnn_staging()
 
-        # print("???", m_deq.shape)
 
         mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)        
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
