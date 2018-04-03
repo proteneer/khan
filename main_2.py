@@ -104,22 +104,6 @@ def main():
 
         l2_losses = [trainer.l2]
         print("Evaluating Rotamer Errors:")
-        # TODO: perf only if chief
-
-        # grad_results = trainer.feed_dataset(
-        #     rd_train,
-        #     shuffle=False,
-        #     target_ops=[trainer.all_grads[0]],
-        #     batch_size=batch_size)
-
-        # for gv in grad_results:
-            # for grads, variables in gv[0]:
-                # print(grads)
-                # print(grads.shape)
-                # print(v[0], v[1])
-                # print(v[0].shape, v[1].shape)
-
-            # print(g.shape, v.shape)
 
         # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
             # print(name, "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
@@ -130,7 +114,7 @@ def main():
             trainer.global_step,
             trainer.learning_rate,
             trainer.local_epoch_count,
-            trainer.all_l2s[0],
+            trainer.l2,
             trainer.train_op
         ]
 
@@ -146,15 +130,17 @@ def main():
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                # sess.run(trainer.max_norm_ops)
+                sess.run(trainer.max_norm_ops) # should this run after every batch instead?
+
+                start_time = time.time()
                 train_results = trainer.feed_dataset(
                     rd_train,
-                    shuffle=False,
+                    shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size)
 
                 global_epoch = train_results[0][0] // rd_train.num_batches(batch_size)
-                print("Avg time per epoch", (time.time() - start_time) / (global_epoch + 1 - start_epoch))
+                print("Avg time per epoch", (time.time() - start_time) / trainer.num_gpus)
 
                 train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
 
