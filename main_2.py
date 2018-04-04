@@ -171,6 +171,7 @@ def main():
 
                 print('', end='\n')
 
+            print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
 

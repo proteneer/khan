@@ -131,8 +131,6 @@ class AniOp : public OpKernel {
         X_feat_O->flat<float>().data()
       );
       gpuErrchk(cudaPeekAtLastError());
-    } else {
-      std::cout << "Empty mol" << std::endl;
     }
     
 

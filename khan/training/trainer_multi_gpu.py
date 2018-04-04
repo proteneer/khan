@@ -337,7 +337,7 @@ class TrainerMultiGPU():
             # submit remainder
             remainder = n_batches % self.num_gpus
             if remainder:
-                print("submitting remainder")
+                # print("submitting remainder")
                 for _ in range(self.num_gpus - remainder):
                     self.sess.run(self.put_op, feed_dict={
                         self.x_enq: np.zeros((0, 1), dtype=np.float32),
@@ -352,16 +352,10 @@ class TrainerMultiGPU():
         executor.submit(submitter)
 
         results = []
-        # ceildiv - round up as opposed to down
         n_gpu_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_gpus)
 
         for i in range(n_gpu_batches):
             res = self.sess.run(target_ops)
-
-            # print(res)
-            # if len(target_ops) == 5:
-                # print("batch rmse:", np.sqrt(np.mean(res[3])))
-
             results.append(res)
 
 
