@@ -1,3 +1,10 @@
+# cython: linetrace=True
+# cython: profile=True
+
+
+
+FOO = "BAR"
+
 import numpy as np
 
 cimport numpy as np
@@ -38,6 +45,7 @@ c_pair_terms[2][2] = [-17.828686, 2340.157690, -9992.230320, 10620.368400]
 c_pair_terms[2][3] = [-98.885354, 2688.195990, -9993.419310, 10591.472300]
 c_pair_terms[3][2] = [-98.885354, 2688.195990, -9993.419310, 10591.472300]
 c_pair_terms[3][3] = [-111.653267, -355.339147, 10000.000000, 11442.509100]
+
 
 
 ctypedef vector[float] float_vec                                                        

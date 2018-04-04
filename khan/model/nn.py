@@ -27,7 +27,6 @@ class AtomNN():
 
         assert layer_sizes[-1] == 1
 
-
         self.features = features
         self.Ws = []
         self.bs = []
@@ -38,8 +37,10 @@ class AtomNN():
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
-            b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
+            with tf.device('/cpu:0'):
+
+                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
+                b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
 
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
@@ -71,34 +72,36 @@ class AtomNN():
 
 def mnn_staging():
 
-    f0_enq = tf.placeholder(dtype=tf.float32)
-    f1_enq = tf.placeholder(dtype=tf.float32)
-    f2_enq = tf.placeholder(dtype=tf.float32)
-    f3_enq = tf.placeholder(dtype=tf.float32)
+    x_enq = tf.placeholder(dtype=tf.float32)
+    y_enq = tf.placeholder(dtype=tf.float32)
+    z_enq = tf.placeholder(dtype=tf.float32)
+    a_enq = tf.placeholder(dtype=tf.int32)
+    m_enq = tf.placeholder(dtype=tf.int32)
+    si_enq = tf.placeholder(dtype=tf.int32)
     gi_enq = tf.placeholder(dtype=tf.int32)
-    mi_enq = tf.placeholder(dtype=tf.int32)
-    yt_enq = tf.placeholder(dtype=tf.float32)
+    ac_enq = tf.placeholder(dtype=tf.int32)
+    y_trues = tf.placeholder(dtype=tf.float32)
 
     staging = tf.contrib.staging.StagingArea(
         capacity=10, dtypes=[
-            tf.float32,
-            tf.float32,
-            tf.float32,
-            tf.float32,
-            tf.int32,
-            tf.int32,
-            tf.float32])
+            tf.float32,  # Xs
+            tf.float32,  # Ys
+            tf.float32,  # Zs
+            tf.int32,    # As
+            tf.int32,    # mol ids
+            tf.int32,    # scatter idxs
+            tf.int32,    # gather  idxs
+            tf.int32,    # atom counts
+            tf.float32   # Y TRUEss
+        ])
 
-    put_op = staging.put([f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq])
+    put_op = staging.put([x_enq, y_enq, z_enq, a_enq, m_enq, si_enq, gi_enq, ac_enq, y_trues])
     get_op = staging.get()
 
-    # feat_size = 768
-
-    f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
-
     return [
-        (f0_enq, f1_enq, f2_enq, f3_enq, gi_enq, mi_enq, yt_enq),
-        (f0_deq, f1_deq, f2_deq, f3_deq, gi_deq, mi_deq, yt_deq),
+        (x_enq,     y_enq,     z_enq,     a_enq,     m_enq,     si_enq,    gi_enq,    ac_enq,    y_trues),
+        get_op,
+        # (get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6], get_op[7], get_op[8]),
         put_op
     ]
 
