@@ -20,13 +20,8 @@ selfIxnNrgMO62x = np.array([
    -75.062826,
 ], dtype=np.float32)
 
-import pyximport
-pyximport.install()
-
-
 # import correction
-import correction
-import featurizer
+# import featurizer
 
 MAX_ATOM_LIMIT = 32
 
@@ -269,12 +264,16 @@ def load_hdf5_files(
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
                         continue
+
+
+                    # BROKEN FOR NOW
                     js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
                     y = E[k] - js18pairwiseOffset + calibration_offset
 
                     ys.append(y)
                     X = featurizer.ANI1(R[k], Z)
                     Xs.append(X)
+                    # BROKEN FOR NOW
 
             else:
                 wb97offset = 0

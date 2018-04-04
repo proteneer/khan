@@ -1,5 +1,6 @@
 // compiler flags:
 // nvcc -std=c++11 -arch=sm_61 -shared ani_op.cc.cu kernel.cu -o ani.so ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -I ~/Code/cub-1.8.0/ -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I /usr/local --expt-relaxed-constexp
+// nvcc -std=c++11 -arch=sm_61 -shared ani_op.cc.cu kernel.cu -o ani.so ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -I ~/Code/cub-1.8.0/ -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I ~/cuda_cluster_pkgs_rhel6/usr/local/ --expt-relaxed-constexpr -ltensorflow_framework
 
 #define EIGEN_USE_GPU // do *not* remove, this is used by the tf/eigen headers to define GpuDevice types
 // #define GOOGLE_CUDA // define using -D GOOGLE_CUDA 1 on the c++ level instead

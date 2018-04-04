@@ -30,7 +30,7 @@ def main():
 
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
-    parser.add_argument('--prod', default=False, action='store_true', help="Whether we run over all of gdb8")
+    parser.add_argument('--gpus', default=1, help="Number of gpus we use")
 
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
@@ -78,7 +78,7 @@ def main():
 
     with tf.Session(config=config) as sess:
 
-        trainer = TrainerMultiGPU(sess)
+        trainer = TrainerMultiGPU(sess, n_gpus=int(args.gpus))
         trainer.initialize()
 
         if os.path.exists(save_dir):
@@ -90,7 +90,7 @@ def main():
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
             print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
-        max_local_epoch_count = 10
+        max_local_epoch_count = 100
 
         train_ops = [
             trainer.global_epoch_count,
