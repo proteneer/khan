@@ -92,12 +92,9 @@ class TrainerMultiGPU():
     def __init__(
         self,
         sess,
-        f0_debug=None,
-        f1_debug=None,
-        f2_debug=None,
-        f3_debug=None):
+        n_gpus=1):
 
-        self.num_gpus = 2
+        self.num_gpus = n_gpus
 
         self.x_enq = tf.placeholder(dtype=tf.float32)
         self.y_enq = tf.placeholder(dtype=tf.float32)
