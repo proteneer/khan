@@ -60,12 +60,12 @@ class DataLoader():
             gdb_files = [
                 os.path.join(data_dir, "ani_gdb_s01.h5"),
                 os.path.join(data_dir, "ani_gdb_s02.h5"),
-                # os.path.join(data_dir, "ani_gdb_s03.h5"),
-                # os.path.join(data_dir, "ani_gdb_s04.h5"),
-                # os.path.join(data_dir, "ani_gdb_s05.h5"),
-                # os.path.join(data_dir, "ani_gdb_s06.h5"),
-                # os.path.join(data_dir, "ani_gdb_s07.h5"),
-                # os.path.join(data_dir, "ani_gdb_s08.h5"),
+                os.path.join(data_dir, "ani_gdb_s03.h5"),
+                os.path.join(data_dir, "ani_gdb_s04.h5"),
+                os.path.join(data_dir, "ani_gdb_s05.h5"),
+                os.path.join(data_dir, "ani_gdb_s06.h5"),
+                os.path.join(data_dir, "ani_gdb_s07.h5"),
+                os.path.join(data_dir, "ani_gdb_s08.h5"),
             ]
 
             # gdb_files = [os.path.join(data_dir, "ani_gdb_s03.h5")]
