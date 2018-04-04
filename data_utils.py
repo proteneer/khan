@@ -28,8 +28,7 @@ pyximport.install()
 import correction
 import featurizer
 
-
-
+MAX_ATOM_LIMIT = 32
 
 
 def convert_species_to_atomic_nums(s):
@@ -40,6 +39,7 @@ def convert_species_to_atomic_nums(s):
   res =  np.array(res, dtype=np.int32)
   np.ascontiguousarray(res)
   return res
+
 
 def filter(xyz_file, use_fitted):
     with open(xyz_file, "r") as fh:
@@ -64,6 +64,9 @@ def filter(xyz_file, use_fitted):
             elems.append(elem)
             coords.append((float(res[1]),float(res[2]),float(res[3])))
 
+        if len(elems) > MAX_ATOM_LIMIT:
+            return True
+
         coords = np.array(coords, dtype=np.float32)
 
         # Z = convert_species_to_atomic_nums(elems)
@@ -75,6 +78,7 @@ def filter(xyz_file, use_fitted):
                 return True
 
         return False
+
 
 def parse_xyz(xyz_file, use_fitted):
     """
@@ -144,45 +148,13 @@ def parse_xyz(xyz_file, use_fitted):
         return X, y, c
 
 
-def load_ff_files_groups(ff_dir, use_fitted=False):
-    ys = []
-
-    for gidx, (root, dirs, files) in enumerate(os.walk(ff_dir)):
-        group_ys = []
-        for filename in files:
-            rootname, extension = os.path.splitext(filename)
-            if extension == ".xyz":
-                filepath = os.path.join(root, filename)
-                
-                if filter(filepath, use_fitted):
-                    # print("Filtered")
-                    continue
-
-                _, y, _ = parse_xyz(filepath, use_fitted)
-
-
-                group_ys.append(y)
-
-                # DEBUG
-                # if sum([len(a) for a in ys]) + len(group_ys) > 6000:
-                #     if len(group_ys) > 0:
-                #         ys.append(group_ys)
-                #     return ys
-                # DEBUG
-                
-            else:
-                print("Unknown filetype:", filename)
-
-        if len(group_ys) > 0:
-            ys.append(group_ys)
-
-    return ys
-
 def load_ff_files(ff_dir, use_fitted=False):
     Xs = []
     ys = []
+    g_ys = []
     # cs = []
     for root, dirs, files in os.walk(ff_dir):
+        group_ys = []
         for filename in files:
             rootname, extension = os.path.splitext(filename)
             if extension == ".xyz":
@@ -196,14 +168,13 @@ def load_ff_files(ff_dir, use_fitted=False):
 
                 Xs.append(X)
                 ys.append(y)
-                # cs.append(c)
-
-                # if len(ys) > 6000:
-                    # return Xs, ys
-
+                group_ys.append(y)
 
             else:
                 print("Unknown filetype:", filename)
+
+        if len(group_ys) > 0:
+            g_ys.append(group_ys)
 
     # for charge in [-2, -1, 0, 1, 2]:
         # m_idxs = np.argwhere(np.array(cs, dtype=np.int32) == charge)
@@ -224,7 +195,7 @@ def load_ff_files(ff_dir, use_fitted=False):
 
     # assert 0
     # print(len(Xs), len(ys))
-    return Xs, ys
+    return Xs, ys, g_ys
 
 
 import time
@@ -281,6 +252,11 @@ def load_hdf5_files(
             path = P.split("/")[-1]
 
             Z = convert_species_to_atomic_nums(S)
+
+            if len(Z) > MAX_ATOM_LIMIT:
+                print("skipipng")
+                continue
+
             minimum_wb97 = np.amin(E)
 
             if use_fitted:
@@ -298,7 +274,6 @@ def load_hdf5_files(
 
                     ys.append(y)
                     X = featurizer.ANI1(R[k], Z)
-                    print(len(X))
                     Xs.append(X)
 
             else:
@@ -319,9 +294,9 @@ def load_hdf5_files(
 
                 for k in range(len(E)):
                     if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
-                        # print("skipping")
-                        # assert 0
                         continue
+
+
                     y = E[k] - wb97offset + calibration_offset
                     ys.append(y)
 

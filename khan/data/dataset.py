@@ -38,7 +38,7 @@ class RawDataset():
     def num_batches(self, batch_size):
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate_advanced(self, batch_size, shuffle=True):
+    def iterate_advanced(self, batch_size, shuffle):
 
         perm = np.arange(len(self.all_Xs))
         if shuffle:
@@ -56,6 +56,13 @@ class RawDataset():
             for local_idx, p_idx in enumerate(perm[s_m_idx:e_m_idx]):
                 # print("p_idx", p_idx)
                 mol = self.all_Xs[p_idx]
+
+                # do *not* remove this line. It's a super important sanity check since our
+                # GPU kernels do not support larger than 32 atoms.
+                if len(mol) > 32:
+                    print("FATAL: Molecules with more than 32 atoms are not supported.")
+                    assert 0
+
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
 

@@ -1,7 +1,7 @@
 import numpy as np
 import os
 
-import sklearn
+import sklearn.model_selection
 
 import time
 from khan.data.dataset import RawDataset
@@ -60,9 +60,9 @@ class DataLoader():
             gdb_files = [
                 os.path.join(data_dir, "ani_gdb_s01.h5"),
                 os.path.join(data_dir, "ani_gdb_s02.h5"),
-                os.path.join(data_dir, "ani_gdb_s03.h5"),
-                os.path.join(data_dir, "ani_gdb_s04.h5"),
-                os.path.join(data_dir, "ani_gdb_s05.h5"),
+                # os.path.join(data_dir, "ani_gdb_s03.h5"),
+                # os.path.join(data_dir, "ani_gdb_s04.h5"),
+                # os.path.join(data_dir, "ani_gdb_s05.h5"),
                 # os.path.join(data_dir, "ani_gdb_s06.h5"),
                 # os.path.join(data_dir, "ani_gdb_s07.h5"),
                 # os.path.join(data_dir, "ani_gdb_s08.h5"),
@@ -76,12 +76,6 @@ class DataLoader():
                 use_fitted=self.use_fitted)
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
-        # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
-
-        print(np.amax(y_train), np.amin(y_train), np.mean(y_train), np.std(y_train))
-        # for y in y_train:
-            # print(y)
-
 
         return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
@@ -91,7 +85,7 @@ class DataLoader():
         #     Xs.extend(ff_train_Xs) # add training data here
         #     ys.extend(ff_train_ys)
 
-        # Xs, ys = sklearn.utils.shuffle(Xs, ys)    
+        # Xs, ys = sklearn.utils.shuffle(Xs, ys) # no need to shuffle anymore since we shuffle inside the
 
         # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
 
@@ -122,9 +116,9 @@ class DataLoader():
 
     def load_ff(self, data_dir):
 
-        ff_groups = data_utils.load_ff_files_groups(data_dir, use_fitted=self.use_fitted)
+        # ff_groups = data_utils.load_ff_files_groups(data_dir, use_fitted=self.use_fitted)
 
-        ff_test_Xs, ff_test_ys = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
+        ff_test_Xs, ff_test_ys, ff_groups = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
 
 
 

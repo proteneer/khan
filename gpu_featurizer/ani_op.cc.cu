@@ -4,8 +4,6 @@
 #define EIGEN_USE_GPU // do *not* remove, this is used by the tf/eigen headers to define GpuDevice types
 // #define GOOGLE_CUDA // define using -D GOOGLE_CUDA 1 on the c++ level instead
 
-// #include "ani_op.h"
-
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -116,6 +114,7 @@ class AniOp : public OpKernel {
     gpuErrchk(cudaMemsetAsync(X_feat_O->flat<float>().data(), 0, acs[3]*384*sizeof(int), d.stream()));
 
     if(n_mols > 0) {
+      // gpu kernel's can't be launched with a zero blockdim
       featurize<<<n_mols, 32, 0, d.stream()>>>(
         input_Xs.flat<float>().data(),
         input_Ys.flat<float>().data(),

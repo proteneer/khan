@@ -97,7 +97,7 @@ class TrainerMultiGPU():
         f2_debug=None,
         f3_debug=None):
 
-        self.num_gpus = 3
+        self.num_gpus = 2
 
         self.x_enq = tf.placeholder(dtype=tf.float32)
         self.y_enq = tf.placeholder(dtype=tf.float32)
@@ -105,6 +105,7 @@ class TrainerMultiGPU():
         self.a_enq = tf.placeholder(dtype=tf.int32)
         self.m_enq = tf.placeholder(dtype=tf.int32)
         self.yt_enq = tf.placeholder(dtype=tf.float32)
+        self.bi_enq = tf.placeholder(dtype=tf.int32)
 
         queue = tf.FIFOQueue(capacity=50, dtypes=[
                 tf.float32,  # Xs
@@ -112,7 +113,8 @@ class TrainerMultiGPU():
                 tf.float32,  # Zs
                 tf.int32,    # As
                 tf.int32,    # mol ids
-                tf.float32   # Y TRUEss
+                tf.float32,  # Y TRUEss
+                tf.int32,    # b_idxs
             ]);
 
         self.put_op = queue.enqueue([
@@ -121,7 +123,8 @@ class TrainerMultiGPU():
             self.z_enq,
             self.a_enq,
             self.m_enq,
-            self.yt_enq
+            self.yt_enq,
+            self.bi_enq
         ])
 
         self.sess = sess
@@ -129,47 +132,43 @@ class TrainerMultiGPU():
         with tf.device('/cpu:0'):
 
             self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False)
-
             self.optimizer = tf.train.AdamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
                     epsilon=1e-8) # change defaults
+
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-
             self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.1))
-
+            self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-
+            self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
             self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
             self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
-            self.all_grads = [] # do something similar for all L2s, etc.
-            self.all_preds = []
-            self.all_l2s = []
+            # these data elements are unordered since the gpu grabs the batches in different orders
+
+            self.tower_grads = [] # average is order invariant
+            self.tower_preds = []
+            self.tower_bids = []
+            self.tower_l2s = []
             self.all_models = []
             self.tower_exp_loss = []
-            self.tower_grads = []
 
             with tf.variable_scope(tf.get_variable_scope()):
-                for i in range(self.num_gpus):
-                    with tf.device('/gpu:%d' % i):
-                        with tf.name_scope("%s_%d" % ("tower", i)) as scope:
+                for gpu_idx in range(self.num_gpus):
+                    with tf.device('/gpu:%d' % gpu_idx):
+                        with tf.name_scope("%s_%d" % ("tower", gpu_idx)) as scope:
 
                             with tf.device('/cpu:0'):
-
                                 get_op = queue.dequeue()
-                                x_deq, y_deq, z_deq, a_deq, m_deq, labels = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]
-
-
-
-
+                                x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
+                                self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
                                 scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(a_deq)
 
-                            with tf.device('/gpu:%d' % i):
-
+                            with tf.device('/gpu:%d' % gpu_idx):
                                 f0, f1, f2, f3 = ani_mod.ani(
                                     x_deq,
                                     y_deq,
@@ -197,9 +196,9 @@ class TrainerMultiGPU():
                             self.all_models.append(tower_model)
 
                             tower_pred = tower_model.predict_op()
-                            self.all_preds.append(tower_pred)
+                            self.tower_preds.append(tower_pred)
                             tower_l2 = tf.squared_difference(tower_pred, labels)
-                            self.all_l2s.append(tower_l2)
+                            self.tower_l2s.append(tower_l2)
 
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
                             tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
@@ -207,9 +206,25 @@ class TrainerMultiGPU():
                             tf.get_variable_scope().reuse_variables()
                             self.tower_exp_loss.append(tower_exp_loss)
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
-                            self.all_grads.append(tower_grad)
+                            self.tower_grads.append(tower_grad)
 
-            apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.all_grads), global_step=self.global_step)
+            self.best_params = []
+            self.save_best_params_ops = []
+            self.load_best_params_ops = []
+
+            for var in tf.trainable_variables():
+
+                copy_name = "best_"+var.name.split(":")[0]
+                copy_shape = var.shape
+                copy_type = var.dtype
+
+                var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
+
+                self.best_params.append(var_copy)
+                self.save_best_params_ops.append(tf.assign(var_copy, var))
+                self.load_best_params_ops.append(tf.assign(var, var_copy))
+
+            apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.tower_grads), global_step=self.global_step)
             variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
             variables_averages_op = variable_averages.apply(tf.trainable_variables())
             self.train_op = tf.group(apply_gradient_op, variables_averages_op)
@@ -220,29 +235,9 @@ class TrainerMultiGPU():
         for w in ws:
             max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
 
-        self.l2 = tf.squeeze(tf.concat(self.all_l2s, axis=0))
-        self.preds = tf.squeeze(tf.concat(self.all_preds, axis=0))
-
-
-        # 3 x as many
-        print("SELF PREDS SHAPE", self.preds.shape)
-
+        self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
+        # self.unordered_preds = tf.squeeze(tf.concat(self.unordered_preds, axis=0))
         self.max_norm_ops = max_norm_ops
-        # TODO: MAX_NORM
- 
-        # self.x_enq = x_enq
-        # self.y_enq = y_enq
-        # self.z_enq = z_enq
-        # self.a_enq = a_enq
-        # self.m_enq = m_enq
-        # self.si_enq = si_enq
-        # self.gi_enq = gi_enq
-        # self.ac_enq = ac_enq
-        # self.yt_enq = yt_enq
-        # self.put_op = put_op
-
-        # ytz: finalized - so the saver needs to be at the end when all vars have been created.
-        # (though not necessarily initialized)
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -279,12 +274,20 @@ class TrainerMultiGPU():
         return self.exp_loss
 
     def eval_abs_rmse(self, dataset, batch_size=1024):
-        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2], batch_size=batch_size)
+        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
+    def predict(self, dataset, batch_size=1024):
+        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_preds, self.tower_bids], batch_size=batch_size)
+        ordered_ys = []
+        for (ys, ids) in results:
+            sorted_ys = np.take(ys, np.argsort(ids), axis=0)
+            ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
+        return ordered_ys
+
     def eval_eh_rmse(self, dataset, group_ys, batch_size=1024):
-        ys = self.feed_dataset(dataset, shuffle=False, target_ops=[self.preds], batch_size=batch_size)
-        return ed_harder_rmse(group_ys, flatten_results(ys)) * HARTREE_TO_KCAL_PER_MOL
+        ordered_ys = self.predict(dataset, batch_size)
+        return ed_harder_rmse(group_ys, ordered_ys) * HARTREE_TO_KCAL_PER_MOL
 
     def feed_dataset(self,
         dataset,
@@ -329,15 +332,14 @@ class TrainerMultiGPU():
                         self.a_enq: atom_types,
                         self.m_enq: mol_idxs,
                         self.yt_enq: mol_yts,
+                        self.bi_enq: b_idx
                     })
                     g_b_idx += 1
                 except Exception as e:
                     print("EEEEE", e)
 
-            # submit remainder
             remainder = n_batches % self.num_gpus
             if remainder:
-                # print("submitting remainder")
                 for _ in range(self.num_gpus - remainder):
                     self.sess.run(self.put_op, feed_dict={
                         self.x_enq: np.zeros((0, 1), dtype=np.float32),
@@ -346,7 +348,9 @@ class TrainerMultiGPU():
                         self.a_enq: np.zeros((0, ), dtype=np.int32),
                         self.m_enq: np.zeros((0, ), dtype=np.int32),
                         self.yt_enq: np.zeros((0, )),
+                        self.bi_enq: b_idx,
                     })
+                    b_idx += 1
         
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)

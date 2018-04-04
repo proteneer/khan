@@ -1,11 +1,7 @@
-import glob
 import os
 import numpy as np
-import tempfile
 import time
 import tensorflow as tf
-import sklearn
-import sklearn.model_selection
 
 from khan.training.trainer import Trainer, flatten_results
 from khan.training.trainer_multi_gpu import TrainerMultiGPU, flatten_results
@@ -15,10 +11,6 @@ from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import argparse
-import line_profiler
-import pyximport
-pyximport.install()
-
 import featurizer
 
 def assert_stats(profile, name):
@@ -43,9 +35,6 @@ def main():
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
 
-    parser.add_argument('--ps', default=False, action='store_true', help="Whether or not we're a parameter server")
-    parser.add_argument('--task_idx', default=0,  help="Which data shard the worker will process")
-
     args = parser.parse_args()
 
     print("Arguments", args)
@@ -61,10 +50,6 @@ def main():
     CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
 
     save_dir = os.path.join(ANI_WORK_DIR, "save")
-    # data_dir_gdb11 = os.path.join(ANI_WORK_DIR, "gdb11")
-    # data_dir_fftest_neutral = os.path.join(ANI_WORK_DIR, "fftest")
-    # data_dir_fftest_charged = os.path.join(ANI_WORK_DIR, "fftest_charged")
-    # data_dir_fftest_ccsdt = os.path.join(ANI_WORK_DIR, "ccsdt_dataset")
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
@@ -89,32 +74,29 @@ def main():
     eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
     eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
 
-    # eval_names    = ["Neutral Rotamers"]
-    # eval_groups   = [ffneutral_groups_mo62x]
-    # eval_datasets = [rd_ffneutral_mo62x]
-
     config = tf.ConfigProto(allow_soft_placement=True)
 
     with tf.Session(config=config) as sess:
 
-        print("foo")
-
         trainer = TrainerMultiGPU(sess)
         trainer.initialize()
 
-        l2_losses = [trainer.l2]
+        if os.path.exists(save_dir):
+            print("Restoring existing model from", save_dir)
+            trainer.load(save_dir)
+
         print("Evaluating Rotamer Errors:")
 
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-            print(name, "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
+            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
-        max_local_epoch_count = 100
+        max_local_epoch_count = 10
 
         train_ops = [
-            trainer.global_step,
+            trainer.global_epoch_count,
             trainer.learning_rate,
             trainer.local_epoch_count,
-            trainer.l2,
+            trainer.unordered_l2s,
             trainer.train_op
         ]
 
@@ -123,8 +105,6 @@ def main():
         print("------------Starting Training--------------")
 
         start_time = time.time()
-
-        start_epoch = sess.run(trainer.global_step) // rd_train.num_batches(batch_size)
 
         while sess.run(trainer.learning_rate) > 5e-10:
 
@@ -139,23 +119,18 @@ def main():
                     target_ops=train_ops,
                     batch_size=batch_size)
 
-                global_epoch = train_results[0][0] // rd_train.num_batches(batch_size)
-                print("Avg time per epoch", (time.time() - start_time))
-
+                global_epoch = train_results[0][0]
+                time_per_epoch = time.time() - start_time
                 train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-
-                print("train_abs_rmse", train_abs_rmse, "kcal/mol")
-
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
 
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-                    'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
-                    'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
+                    'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 if test_abs_rmse < best_test_score:
-                    # trainer.save_best_params()
+                    trainer.save_best_params()
                     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                     for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
@@ -163,17 +138,18 @@ def main():
                             "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
 
                     best_test_score = test_abs_rmse
-                    sess.run(trainer.reset_local_epoch_count)
+                    sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
                 else:
-                    sess.run(trainer.incr_local_epoch_count)
+                    sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
-                # trainer.save(save_dir)
+                trainer.save(save_dir)
 
                 print('', end='\n')
 
             print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
+            trainer.load_best_params()
 
     return
 
