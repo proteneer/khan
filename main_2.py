@@ -61,7 +61,7 @@ def main():
     CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
 
     save_dir = os.path.join(ANI_WORK_DIR, "save")
-    data_dir_gdb11 = os.path.join(ANI_WORK_DIR, "gdb11")
+    # data_dir_gdb11 = os.path.join(ANI_WORK_DIR, "gdb11")
     # data_dir_fftest_neutral = os.path.join(ANI_WORK_DIR, "fftest")
     # data_dir_fftest_charged = os.path.join(ANI_WORK_DIR, "fftest_charged")
     # data_dir_fftest_ccsdt = os.path.join(ANI_WORK_DIR, "ccsdt_dataset")
@@ -76,22 +76,22 @@ def main():
     else:
         ff_train_dir = None
 
-    rd_train, rd_test = data_loader.load_gdb8(ANI_WORK_DIR, ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+    rd_train, rd_test = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
 
     batch_size = 1024
     
-    rd_gdb11 = data_loader.load_gdb11(data_dir_gdb11, ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
-    rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral"), ROTAMER_TEST_DIR)
-    rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_neutral_ccsdt"), CCSDT_ROTAMER_TEST_DIR)
-    rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(os.path.join(ANI_WORK_DIR, "fftest_charged"), CHARGED_ROTAMER_TEST_DIR)
+    rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
+    rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
+    rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
+    rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
 
-    # eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
-    # eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
-    # eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
+    eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
+    eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
+    eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
 
-    eval_names    = ["Neutral Rotamers"]
-    eval_groups   = [ffneutral_groups_mo62x]
-    eval_datasets = [rd_ffneutral_mo62x]
+    # eval_names    = ["Neutral Rotamers"]
+    # eval_groups   = [ffneutral_groups_mo62x]
+    # eval_datasets = [rd_ffneutral_mo62x]
 
     config = tf.ConfigProto(allow_soft_placement=True)
 
@@ -105,8 +105,8 @@ def main():
         l2_losses = [trainer.l2]
         print("Evaluating Rotamer Errors:")
 
-        # for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-            # print(name, "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
+        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+            print(name, "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
         max_local_epoch_count = 100
 
@@ -118,7 +118,7 @@ def main():
             trainer.train_op
         ]
 
-        # best_test_score = trainer.eval_abs_rmse(rd_test)
+        best_test_score = trainer.eval_abs_rmse(rd_test)
 
         print("------------Starting Training--------------")
 
@@ -140,39 +140,39 @@ def main():
                     batch_size=batch_size)
 
                 global_epoch = train_results[0][0] // rd_train.num_batches(batch_size)
-                print("Avg time per epoch", (time.time() - start_time) / trainer.num_gpus)
+                print("Avg time per epoch", (time.time() - start_time))
 
                 train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
 
                 print("train_abs_rmse", train_abs_rmse, "kcal/mol")
 
-                # learning_rate = train_results[0][1]
-                # local_epoch_count = train_results[0][2]
+                learning_rate = train_results[0][1]
+                local_epoch_count = train_results[0][2]
 
-                # test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-                # print(time.strftime("%Y-%m-%d %H:%M:%S"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-                #     'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
-                #     'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+                test_abs_rmse = trainer.eval_abs_rmse(rd_test)
+                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
+                    'train abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), \
+                    'test abs rmse:', "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
-                # if test_abs_rmse < best_test_score:
-                #     # trainer.save_best_params()
-                #     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                #     print(' | gdb11 abs rmse', "{  0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-                #     for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                #         print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
-                #             "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
+                if test_abs_rmse < best_test_score:
+                    # trainer.save_best_params()
+                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                        print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
+                            "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
 
-                #     best_test_score = test_abs_rmse
-                #     sess.run(trainer.reset_local_epoch_count)
-                # else:
-                #     sess.run(trainer.incr_local_epoch_count)
+                    best_test_score = test_abs_rmse
+                    sess.run(trainer.reset_local_epoch_count)
+                else:
+                    sess.run(trainer.incr_local_epoch_count)
 
                 # trainer.save(save_dir)
 
                 print('', end='\n')
 
-            # sess.run(trainer.decr_learning_rate)
-            # sess.run(trainer.reset_local_epoch_count)
+            sess.run(trainer.decr_learning_rate)
+            sess.run(trainer.reset_local_epoch_count)
 
     return
 

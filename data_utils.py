@@ -164,14 +164,15 @@ def load_ff_files_groups(ff_dir, use_fitted=False):
                 group_ys.append(y)
 
                 # DEBUG
-                if sum([len(a) for a in ys]) + len(group_ys) > 6000:
-                    if len(group_ys) > 0:
-                        ys.append(group_ys)
-                    return ys
+                # if sum([len(a) for a in ys]) + len(group_ys) > 6000:
+                #     if len(group_ys) > 0:
+                #         ys.append(group_ys)
+                #     return ys
                 # DEBUG
                 
             else:
                 print("Unknown filetype:", filename)
+
         if len(group_ys) > 0:
             ys.append(group_ys)
 
@@ -197,8 +198,8 @@ def load_ff_files(ff_dir, use_fitted=False):
                 ys.append(y)
                 # cs.append(c)
 
-                if len(ys) > 6000:
-                    return Xs, ys
+                # if len(ys) > 6000:
+                    # return Xs, ys
 
 
             else:

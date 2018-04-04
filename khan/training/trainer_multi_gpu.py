@@ -160,6 +160,10 @@ class TrainerMultiGPU():
 
                                 get_op = queue.dequeue()
                                 x_deq, y_deq, z_deq, a_deq, m_deq, labels = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]
+
+
+
+
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
                                 scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(a_deq)
@@ -218,6 +222,10 @@ class TrainerMultiGPU():
 
         self.l2 = tf.squeeze(tf.concat(self.all_l2s, axis=0))
         self.preds = tf.squeeze(tf.concat(self.all_preds, axis=0))
+
+
+        # 3 x as many
+        print("SELF PREDS SHAPE", self.preds.shape)
 
         self.max_norm_ops = max_norm_ops
         # TODO: MAX_NORM
@@ -295,29 +303,59 @@ class TrainerMultiGPU():
             accum = 0
             g_b_idx = 0
 
-            for i in range(self.num_gpus):
-                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate_advanced(batch_size=batch_size, shuffle=shuffle)): # FIX SHUFFLE TO SHUFFLE
-                    atom_types = (mol_xs[:, 0]).astype(np.int32)
-                    try:
-                        # print("feeding...", g_b_idx)
-                        self.sess.run(self.put_op, feed_dict={
-                            self.x_enq: mol_xs[:, 1],
-                            self.y_enq: mol_xs[:, 2],
-                            self.z_enq: mol_xs[:, 3],
-                            self.a_enq: atom_types,
-                            self.m_enq: mol_idxs,
-                            self.yt_enq: mol_yts,
-                        })
-                        g_b_idx += 1
-                    except Exception as e:
-                        print("EEEEE", e)
+            # for i in range(self.num_gpus):
 
+            # suppose we have 4 gpus and 5 batches
+            # the distribution schedule is as follows:
+            # gpu   0 1 2 3
+            # bid0  1 1 1 1
+            # bid1  1 0 0 0
+
+            # suppose we have 3 gpus and 5 batches
+            # the distribution schedule is as follows:
+            # gpu   0 1 2
+            # bid0  1 1 1
+            # bid1  1 1 0
+
+            n_batches = dataset.num_batches(batch_size)
+
+            for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate_advanced(batch_size=batch_size, shuffle=shuffle)):
+                atom_types = (mol_xs[:, 0]).astype(np.int32)
+                try:
+                    self.sess.run(self.put_op, feed_dict={
+                        self.x_enq: mol_xs[:, 1],
+                        self.y_enq: mol_xs[:, 2],
+                        self.z_enq: mol_xs[:, 3],
+                        self.a_enq: atom_types,
+                        self.m_enq: mol_idxs,
+                        self.yt_enq: mol_yts,
+                    })
+                    g_b_idx += 1
+                except Exception as e:
+                    print("EEEEE", e)
+
+            # submit remainder
+            remainder = n_batches % self.num_gpus
+            if remainder:
+                print("submitting remainder")
+                for _ in range(self.num_gpus - remainder):
+                    self.sess.run(self.put_op, feed_dict={
+                        self.x_enq: np.zeros((0, 1), dtype=np.float32),
+                        self.y_enq: np.zeros((0, 1), dtype=np.float32),
+                        self.z_enq: np.zeros((0, 1), dtype=np.float32),
+                        self.a_enq: np.zeros((0, ), dtype=np.int32),
+                        self.m_enq: np.zeros((0, ), dtype=np.int32),
+                        self.yt_enq: np.zeros((0, )),
+                    })
+        
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)
 
         results = []
-        n_batches = dataset.num_batches(batch_size=batch_size)
-        for i in range(n_batches):
+        # ceildiv - round up as opposed to down
+        n_gpu_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_gpus)
+
+        for i in range(n_gpu_batches):
             res = self.sess.run(target_ops)
 
             # print(res)

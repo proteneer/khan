@@ -55,14 +55,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 }   
 
 class AniOp : public OpKernel {
-  long long counter_;
-  long long timer_;
 
  public:
-  explicit AniOp(OpKernelConstruction* context) : 
-    OpKernel(context),
-    counter_(0),
-    timer_(0) {
+  explicit AniOp(OpKernelConstruction* context) : OpKernel(context) {
     // empty constructor
   }
 
@@ -120,28 +115,28 @@ class AniOp : public OpKernel {
     gpuErrchk(cudaMemsetAsync(X_feat_N->flat<float>().data(), 0, acs[2]*384*sizeof(int), d.stream()));
     gpuErrchk(cudaMemsetAsync(X_feat_O->flat<float>().data(), 0, acs[3]*384*sizeof(int), d.stream()));
 
-    featurize<<<n_mols, 32, 0, d.stream()>>>(
-      input_Xs.flat<float>().data(),
-      input_Ys.flat<float>().data(),
-      input_Zs.flat<float>().data(),
-      input_As.flat<int>().data(),
-      input_MOs.flat<int>().data(),
-      input_MACs.flat<int>().data(),
-      n_mols,
-      input_SIs.flat<int>().data(),
-      X_feat_H->flat<float>().data(),
-      X_feat_C->flat<float>().data(),
-      X_feat_N->flat<float>().data(),
-      X_feat_O->flat<float>().data()
-    );
+    if(n_mols > 0) {
+      featurize<<<n_mols, 32, 0, d.stream()>>>(
+        input_Xs.flat<float>().data(),
+        input_Ys.flat<float>().data(),
+        input_Zs.flat<float>().data(),
+        input_As.flat<int>().data(),
+        input_MOs.flat<int>().data(),
+        input_MACs.flat<int>().data(),
+        n_mols,
+        input_SIs.flat<int>().data(),
+        X_feat_H->flat<float>().data(),
+        X_feat_C->flat<float>().data(),
+        X_feat_N->flat<float>().data(),
+        X_feat_O->flat<float>().data()
+      );
+      gpuErrchk(cudaPeekAtLastError());
+    } else {
+      std::cout << "Empty mol" << std::endl;
+    }
+    
 
-    gpuErrchk(cudaPeekAtLastError());
 
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-
-    timer_ += duration;
-    counter_++;
 
   }
 };

@@ -12,16 +12,13 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
 #include "tensorflow/core/framework/types.h"
-// #include "tensorflow/core/util/cuda_kernel_helper.h"
 
 #include <vector>
-#include <chrono>
 #include <algorithm>
 
 using namespace tensorflow;
 
 using CPUDevice = Eigen::ThreadPoolDevice;
-// using GPUDevice = Eigen::GpuDevice;
 
 const long long num_atom_types = 4;
 

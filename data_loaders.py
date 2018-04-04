@@ -32,7 +32,6 @@ class DataLoader():
         self.prod = prod
 
     def load_gdb8(self,
-        feat_dir,
         data_dir,
         calibration_file,
         ff_train_dir=None):
@@ -62,11 +61,11 @@ class DataLoader():
                 os.path.join(data_dir, "ani_gdb_s01.h5"),
                 os.path.join(data_dir, "ani_gdb_s02.h5"),
                 os.path.join(data_dir, "ani_gdb_s03.h5"),
-                os.path.join(data_dir, "ani_gdb_s04.h5"),
-                os.path.join(data_dir, "ani_gdb_s05.h5"),
-                os.path.join(data_dir, "ani_gdb_s06.h5"),
-                os.path.join(data_dir, "ani_gdb_s07.h5"),
-                os.path.join(data_dir, "ani_gdb_s08.h5"),
+                # os.path.join(data_dir, "ani_gdb_s04.h5"),
+                # os.path.join(data_dir, "ani_gdb_s05.h5"),
+                # os.path.join(data_dir, "ani_gdb_s06.h5"),
+                # os.path.join(data_dir, "ani_gdb_s07.h5"),
+                # os.path.join(data_dir, "ani_gdb_s08.h5"),
             ]
 
             # gdb_files = [os.path.join(data_dir, "ani_gdb_s03.h5")]
@@ -106,13 +105,12 @@ class DataLoader():
         # return fd_train, fd_test
 
     def load_gdb11(self,
-        feat_dir,
         data_dir,
         calibration_file,
         use_fitted=False):
 
-        if os.path.exists(feat_dir):
-            return FeaturizedDataset(feat_dir)
+        # if os.path.exists(feat_dir):
+            # return FeaturizedDataset(feat_dir)
 
         X_gdb11, y_gdb11 = data_utils.load_hdf5_files([
             os.path.join(data_dir, "ani1_gdb10_ts.h5"),
@@ -122,12 +120,13 @@ class DataLoader():
 
         return RawDataset(X_gdb11, y_gdb11)
 
-    def load_ff(self,
-        feat_dir,
-        data_dir):
+    def load_ff(self, data_dir):
 
         ff_groups = data_utils.load_ff_files_groups(data_dir, use_fitted=self.use_fitted)
 
         ff_test_Xs, ff_test_ys = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
+
+
+
+
         return RawDataset(ff_test_Xs, ff_test_ys), ff_groups
-        # return ff_db.featurize(self.batch_size, feat_dir), ff_groups
