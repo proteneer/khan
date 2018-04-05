@@ -79,7 +79,6 @@ def main():
     with tf.Session(config=config) as sess:
 
         trainer = TrainerMultiGPU(sess, n_gpus=int(args.gpus))
-        trainer.initialize()
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)

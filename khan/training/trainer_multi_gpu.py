@@ -104,7 +104,7 @@ class TrainerMultiGPU():
         self.yt_enq = tf.placeholder(dtype=tf.float32)
         self.bi_enq = tf.placeholder(dtype=tf.int32)
 
-        queue = tf.FIFOQueue(capacity=50, dtypes=[
+        queue = tf.FIFOQueue(capacity=20*self.num_gpus, dtypes=[
                 tf.float32,  # Xs
                 tf.float32,  # Ys
                 tf.float32,  # Zs
@@ -144,7 +144,6 @@ class TrainerMultiGPU():
             self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
             # these data elements are unordered since the gpu grabs the batches in different orders
-
             self.tower_grads = [] # average is order invariant
             self.tower_preds = []
             self.tower_bids = []
@@ -233,14 +232,12 @@ class TrainerMultiGPU():
             max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
-        # self.unordered_preds = tf.squeeze(tf.concat(self.unordered_preds, axis=0))
         self.max_norm_ops = max_norm_ops
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
- 
 
-        return
+        self.initialize()
 
 
     def weight_matrices(self):
@@ -319,7 +316,7 @@ class TrainerMultiGPU():
 
             n_batches = dataset.num_batches(batch_size)
 
-            for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate_advanced(batch_size=batch_size, shuffle=shuffle)):
+            for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
                 atom_types = (mol_xs[:, 0]).astype(np.int32)
                 try:
                     self.sess.run(self.put_op, feed_dict={
