@@ -61,40 +61,24 @@ def average_gradients(tower_grads):
 
 class TrainerMultiGPU():
 
-    # Note: this is a pretty terrible class all in all. I'm ashamed of writing it
-    # but it gets the job done.
+    def __init__(self, sess, n_gpus=1):
+        """
+        A queue-enabled multi-gpu trainer. Construction of this class will also
+        finalize and initialize all the variables pertaining to the input session.
 
+        Parameters
+        ----------
+        sess: tf.Session
+            A tensorflow session under which we use
 
-    def set_session(self, sess):
-        self.sess = sess
+        n_gpus: int (optional)
+            Number of gpus to train the model on. This must be > 0 for now.
 
-    def initialize(self):
-        # todo: call by default
-        self.sess.run(self.global_initializer_op)
-
-    def save_best_params(self):
-        self.sess.run(self.save_best_params_ops)
-
-    def load_best_params(self):
-        self.sess.run(self.load_best_params_ops)
-
-    def save(self, save_dir):
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        save_path = os.path.join(save_dir, "model.ckpt")
-        self.saver.save(self.sess, save_path)
-
-
-    def load(self, save_dir):
-        save_path = os.path.join(save_dir, "model.ckpt")
-        self.saver.restore(self.sess, save_path)
-
-    def __init__(
-        self,
-        sess,
-        n_gpus=1):
+        """
 
         self.num_gpus = n_gpus
+
+        assert self.num_gpus > 0
 
         self.x_enq = tf.placeholder(dtype=tf.float32)
         self.y_enq = tf.placeholder(dtype=tf.float32)
@@ -225,7 +209,7 @@ class TrainerMultiGPU():
             variables_averages_op = variable_averages.apply(tf.trainable_variables())
             self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
-        ws = self.weight_matrices()
+        ws = self._weight_matrices()
         max_norm_ops = []
 
         for w in ws:
@@ -236,19 +220,61 @@ class TrainerMultiGPU():
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
+        self.sess.run(self.global_initializer_op)
 
-        self.initialize()
+    def save_best_params(self):
+        """
+        Copy the current model's trainable parameters as the best so far.
+        """
+        self.sess.run(self.save_best_params_ops)
 
+    def load_best_params(self):
+        """
+        Restore the current model's parameters from the best found so far.
+        """
+        self.sess.run(self.load_best_params_ops)
 
-    def weight_matrices(self):
+    def save(self, save_dir):
+        """
+        Save the entire model to a given directory.
+
+        Parameters
+        ----------
+        save_dir: str
+            Path of the save_dir. If the path does not exist then it will
+            be created automatically.
+
+        """
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        save_path = os.path.join(save_dir, "model.ckpt")
+        self.saver.save(self.sess, save_path)
+
+    def load(self, save_dir):
+        """
+        Load an existing model from an existing directory.
+
+        Parameters
+        ----------
+        save_dir: str
+            Directory containing the checkpoint file. This should be the same
+            as what was passed into save().
+
+        .. note:: It is expected that this directory exists.
+
+        """
+        save_path = os.path.join(save_dir, "model.ckpt")
+        self.saver.restore(self.sess, save_path)
+
+    def _weight_matrices(self):
         weights = []
-        # vars are shared so we just grab them by the first tower
+        # vars are always shared so we can just grab them by the first tower
         for ann in self.all_models[0].anns:
             for W in ann.Ws:
                 weights.append(W)
         return weights
 
-    def biases(self):
+    def _biases(self):
         biases = []
         for ann in self.all_models[0].anns:
             for b in ann.bs:
@@ -272,6 +298,23 @@ class TrainerMultiGPU():
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
     def predict(self, dataset, batch_size=1024):
+        """
+        Infer y-values given a dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset from which we predict from.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        list of floats
+            Returns a list of predicted [y0, y1, y2...] in the same order as the dataset Xs [x0, x1, x2...]
+
+        """
         results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_preds, self.tower_bids], batch_size=batch_size)
         ordered_ys = []
         for (ys, ids) in results:
@@ -288,12 +331,24 @@ class TrainerMultiGPU():
         shuffle,
         target_ops,
         batch_size):
+        """
+        Feed a dataset into the trainer under arbitrary ops.
 
-        # batch_size = 1024
+        Params
+        ------
+        dataset: khan.RawDataset
+            Input dataset that may or may not have y-values depending on the target_ops
 
-        st = time.time()
+        shuffle: bool
+            Whether or not we randomly shuffle the data before feeding.
 
-        # print("num_batches:", dataset.num_batches(batch_size=batch_size))
+        target_ops: list of tf.Tensors
+            tf.Tensors for which we wish to obtain values for.
+
+        batch_size: int
+            Size of the batch for which we iterate the dataset over.
+
+        """
 
         def submitter():
 

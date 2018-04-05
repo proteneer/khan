@@ -1,11 +1,9 @@
-# khan: an open-source deep-learning package for learning molecular energies	
+# KHAN: open-source deep-learning package for molecular energies	
 
-## Background:
-
-The original ANI-1 by Smith et al. (doi:10.1039/C6SC05720A) unfortunately did not provide the
-training algorithm that was used to generate the released models. As part of Schrodinger's collaboration
-with the Pande lab and the DeepChem project, we've taken the initial pure tensorflow implementation
-written by Michael Wu (@miaecle) and optimized it significantly to reduce the training time. 
+As part of Schrodinger's machine-learning collaboration with the Pande lab and the DeepChem project,
+we've taken the initial pure tensorflow implementation written by Michael Wu (@miaecle) and optimized
+it significantly to reduce the training time.  The original ANI-1 by Smith et al. (doi:10.1039/C6SC05720A)
+unfortunately did not provide the training algorithm that was used to generate the released models. 
 
 Note: that this code will at some point be merged back upstream with the DeepChem master, once the
 build procedures have been streamlined.
@@ -144,8 +142,9 @@ with tf.Session(config=config) as sess:
 1. The maximum number of atoms for training is 32
 2. Changing the featurization requires writing some CUDA code.
 3. 4 atoms types (eg. H C N O)
-4. Closed shell systems
-5. Single node training
+4. GPU-Only featurization for now (CPU WIP)
+5. Closed shell systems
+6. Single node training
 
 ## License
 

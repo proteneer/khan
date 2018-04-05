@@ -11,18 +11,6 @@ from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import argparse
-import featurizer
-
-def assert_stats(profile, name):
-    profile.print_stats()
-    stats = profile.get_stats()
-    assert len(stats.timings) > 0, "No profile stats."
-    for key, timings in stats.timings.items():
-        if key[-1] == name:
-            assert len(timings) > 0
-            break
-    else:
-        raise ValueError("No stats for %s." % name)
 
 def main():
 
@@ -78,6 +66,12 @@ def main():
 
     with tf.Session(config=config) as sess:
 
+        # This training code implements cross-validation based training, whereby we determine convergence on a given
+        # epoch depending on the cross-validation error for a given validation set. When a better cross-validation
+        # score is detected, we save the model's parameters as the putative best found parameters. If after more than
+        # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
+        # rate and restore the best found parameters.
+
         trainer = TrainerMultiGPU(sess, n_gpus=int(args.gpus))
 
         if os.path.exists(save_dir):
@@ -105,7 +99,7 @@ def main():
 
         start_time = time.time()
 
-        while sess.run(trainer.learning_rate) > 5e-10:
+        while sess.run(trainer.learning_rate) > 5e-10: # this is to deal with a numerical error, we technically train to 1e-9
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
