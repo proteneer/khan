@@ -22,7 +22,6 @@ def main():
 
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
-    parser.add_argument('--restart', default=False, action='store_true', help="Whether to restart from the save dir")
 
     args = parser.parse_args()
 
@@ -31,40 +30,17 @@ def main():
     ANI_TRAIN_DIR = args.train_dir
     ANI_WORK_DIR = args.work_dir
 
-    CALIBRATION_FILE_TRAIN = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
-    CALIBRATION_FILE_TEST = os.path.join(ANI_TRAIN_DIR, "gdb_11_cal.txt")
-    ROTAMER_TRAIN_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/train")
-    ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
-    CHARGED_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "charged_rotamers_2")
-    CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
-
     save_dir = os.path.join(ANI_WORK_DIR, "save")
-    if os.path.isdir(save_dir) and not args.restart:
-        print('save_dir', save_dir, 'exists and this is not a restart job')
-        exit()
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
 
-    data_loader = DataLoader(use_fitted)
+    data_loader = DataLoader(False)
 
-    if add_ffdata:
-        ff_train_dir = ROTAMER_TRAIN_DIR
-    else:
-        ff_train_dir = None
-
-    rd_train, rd_test = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+    rd_train, rd_test = data_loader.load_gdb8(ANI_TRAIN_DIR)
+    rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
 
     batch_size = 1024
-    
-    rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
-    rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
-    rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
-    rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
-
-    eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
-    eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
-    eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
 
     config = tf.ConfigProto(allow_soft_placement=True)
 
@@ -83,11 +59,6 @@ def main():
             trainer.load(save_dir)
         else:
             trainer.initialize() # initialize to random variables
-
-        print("Evaluating Rotamer Errors:")
-
-        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
 
         max_local_epoch_count = 100
 
@@ -132,9 +103,6 @@ def main():
                     trainer.save_best_params()
                     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-                    for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                        print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(trainer.eval_abs_rmse(ff_data)), \
-                            "{0:.2f} kcal/mol | ".format(trainer.eval_eh_rmse(ff_data, ff_groups)), end='')
 
                     best_test_score = test_abs_rmse
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
@@ -155,21 +123,9 @@ def main():
 
 
 if __name__ == "__main__":
-
-    from tensorflow.python.client import device_lib
-
-    def get_available_gpus():
-        local_device_protos = device_lib.list_local_devices()
-        return [x.name for x in local_device_protos if x.device_type == 'GPU']
-
-    avail_gpus = get_available_gpus()
-
-    print("Available GPUs:", avail_gpus)
-
-    if len(avail_gpus) == 0:
-        raise Exception("No GPUs available to this tensorflow process.")
-
     main()
+
+
 
 
 
