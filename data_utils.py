@@ -123,12 +123,12 @@ def parse_xyz(xyz_file, use_fitted):
         Z = convert_species_to_atomic_nums(elems)
 
         mo62xoffset = 0
-        js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
 
         for z in Z:
             mo62xoffset += selfIxnNrgMO62x[z]
 
         if use_fitted:
+            js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
             y -= js18pairwiseOffset
             if len(cols) == 9:
                 c = float(cols[-2])

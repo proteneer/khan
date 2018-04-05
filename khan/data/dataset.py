@@ -15,12 +15,17 @@ class RawDataset():
 
     def __init__(self, all_Xs, all_ys=None):
         """
+        Construct a raw, unfeaturized dataset representing a collection of molecules.
+
         Params:
         -------
 
         all_Xs: list of np.array
             List of molecule coordinates, where each element in the list is an Nx3 numpy array.
-
+        
+        all_ys: np.array (optional)
+            Numpy array representing the value of each molecule in the all_Xs array. This can be
+            left blank if doing prediction.
 
         """
         offsets = compute_offsets(all_Xs)
@@ -28,17 +33,13 @@ class RawDataset():
         self.all_ys = all_ys
         self.all_Xs = all_Xs
 
-        # self.all_ys = all_ys
-        # self.all_Xs = np.concatenate(all_Xs, axis=0)
-        # self.all_offsets = np.array(offsets, dtype=np.int32) # molecule markers
-
     def num_mols(self):
         return len(self.all_Xs)
 
     def num_batches(self, batch_size):
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate_advanced(self, batch_size, shuffle):
+    def iterate(self, batch_size, shuffle):
 
         perm = np.arange(len(self.all_Xs))
         if shuffle:
