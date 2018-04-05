@@ -34,7 +34,7 @@ class DataLoader():
 
     def load_gdb8(self,
         data_dir,
-        calibration_file,
+        calibration_file=None,
         ff_train_dir=None):
 
         gdb_files = [
@@ -48,9 +48,14 @@ class DataLoader():
             os.path.join(data_dir, "ani_gdb_s08.h5"),
         ]
 
+        if calibration_file:
+            cal_map = load_calibration_file(calibration_file)
+        else:
+            cal_map = None
+
         Xs, ys = data_utils.load_hdf5_files(
             gdb_files,
-            calibration_map=load_calibration_file(calibration_file),
+            calibration_map=cal_map,
             use_fitted=self.use_fitted)
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
@@ -78,16 +83,18 @@ class DataLoader():
 
     def load_gdb11(self,
         data_dir,
-        calibration_file,
+        calibration_file=None,
         use_fitted=False):
 
-        # if os.path.exists(feat_dir):
-            # return FeaturizedDataset(feat_dir)
+        if calibration_file:
+            cal_map = load_calibration_file(calibration_file)
+        else:
+            cal_map = None
 
         X_gdb11, y_gdb11 = data_utils.load_hdf5_files([
             os.path.join(data_dir, "ani1_gdb10_ts.h5"),
         ],
-        calibration_map=load_calibration_file(calibration_file),
+        calibration_map=cal_map,
         use_fitted=self.use_fitted)
 
         return RawDataset(X_gdb11, y_gdb11)

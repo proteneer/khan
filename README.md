@@ -91,7 +91,35 @@ TF_LFLAGS=( $(python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.ge
 
 The built .so files should be placed inside the gpu_featurizer dir directly.
 
-## Customization of datasets
+## Example Run
+
+After downloading the gdb8 and gdb10 datasets in the following section, you can run the example code with:
+
+``` bash
+python gdb8.py --train-dir ANI_DATA_DIR --work-dir /tmp/model/ --gpus 3
+```
+
+The output should look something like:
+``` bash
+2018-04-05 15:31:45.949197: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1423] Adding visible gpu devices: 0, 1, 2
+2018-04-05 15:31:46.872747: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-04-05 15:31:46.872785: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0 1 2 
+2018-04-05 15:31:46.872794: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N N N 
+2018-04-05 15:31:46.872800: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 1:   N N Y 
+2018-04-05 15:31:46.872806: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 2:   N Y N 
+2018-04-05 15:31:46.875790: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 11380 MB memory) -> physical GPU (device: 0, name: TITAN X (Pascal), pci bus id: 0000:05:00.0, compute capability: 6.1)
+2018-04-05 15:31:47.055074: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:1 with 7543 MB memory) -> physical GPU (device: 1, name: GeForce GTX 1080, pci bus id: 0000:02:00.0, compute capability: 6.1)
+2018-04-05 15:31:47.172668: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:2 with 6209 MB memory) -> physical GPU (device: 2, name: GeForce GTX 1080, pci bus id: 0000:4f:00.0, compute capability: 6.1)
+Evaluating Rotamer Errors:
+------------Starting Training--------------
+2018-04-05 15:33:29 tpe: 68.03s, g-epoch 0 l-epoch 0 lr 1e-03 train/test abs rmse: 52.67 kcal/mol, 28.59 kcal/mol | gdb11 abs rmse 45.49 kcal/mol | 
+```
+
+## Datasets
+
+You can download the official ANI-1 GDB8 dataset [here](https://figshare.com/collections/_/3846712). The GDB10 test
+set can be found [here](https://github.com/isayev/ANI1_dataset/blob/master/benchmark/ani1_gdb10_ts.h5).
+They should be all put into a directory, eg. ANI_DATA_DIR
 
 Note that ANI-1 and, deep learning in general, is highly dependent on the shape and quality of your dataset.
 We've made it very straightforward to include additional datasets beyond GDB8. One needs to either
