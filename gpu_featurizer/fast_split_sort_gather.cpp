@@ -16,6 +16,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <numeric>
 
 using namespace tensorflow;
 
@@ -52,7 +53,7 @@ std::vector<size_t> perm(const std::vector<size_t> &idx) {
 std::vector<size_t> sort_indexes(const int *v_start, size_t v_size) {
 
   std::vector<size_t> idx(v_size);
-  iota(idx.begin(), idx.end(), 0);
+  std::iota(idx.begin(), idx.end(), 0);
 
   std::stable_sort(idx.begin(), idx.end(),
        [&v_start](size_t i1, size_t i2) {return *(v_start+i1) < *(v_start+i2);});
