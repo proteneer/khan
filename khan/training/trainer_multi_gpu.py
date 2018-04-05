@@ -220,6 +220,11 @@ class TrainerMultiGPU():
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
+
+    def initialize(self):
+        """
+        Randomly initialize the parameters in the trainer's underlying model.
+        """
         self.sess.run(self.global_initializer_op)
 
     def save_best_params(self):
@@ -252,7 +257,8 @@ class TrainerMultiGPU():
 
     def load(self, save_dir):
         """
-        Load an existing model from an existing directory.
+        Load an existing model from an existing directory and initialize
+        the trainer's Session variables.
 
         Parameters
         ----------

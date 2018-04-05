@@ -99,23 +99,30 @@ construct a khan.RawDataset() or implement a class isomorphic to do it.
 
 ``` python
 import khan
+import tensorflow as tf
+
+# Note that we compact the atomic numbers such that 
+# H:1 -> 0
+# C:6 -> 1
+# N:7 -> 2
+# O:8 -> 3
 
 Xs = [
-	np.array([
-	    [0, 1.0, 2.0, 3.0], # H
-	    [2, 2.0, 1.0, 4.0], # N
-	    [0, 0.5, 1.2, 2.3], # H
-	    [1, 0.3, 1.7, 3.2], # C
-	    [2, 0.6, 1.2, 1.1], # N
-	    [0, 14.0, 23.0, 15.0], # H
-	    [0, 2.0, 0.5, 0.3], # H
-	    [0, 2.3, 0.2, 0.4]
-	]),
-	np.array([
-	    [0, 2.3, 0.2, 0.4], # H
-	    [1, 0.3, 1.7, 3.2], # C
-	    [2, 0.6, 1.2, 1.1]
-	])
+    np.array([
+        [0, 1.0, 2.0, 3.0], # H
+        [2, 2.0, 1.0, 4.0], # N
+        [0, 0.5, 1.2, 2.3], # H
+        [1, 0.3, 1.7, 3.2], # C
+        [2, 0.6, 1.2, 1.1], # N
+        [0, 14.0, 23.0, 15.0], # H
+        [0, 2.0, 0.5, 0.3], # H
+        [0, 2.3, 0.2, 0.4], # H
+    ]),
+    np.array([
+        [0, 2.3, 0.2, 0.4], # H
+        [1, 0.3, 1.7, 3.2], # C
+        [2, 0.6, 1.2, 1.1], # N
+    ])
 ]
 
 ys = [1.5, 3.3]
@@ -126,7 +133,7 @@ batch_size = 1024
 
 with tf.Session(config=config) as sess:
 
-	# initialize a trainer
+    # initialize a trainer
     trainer = khan.TrainerMultiGPU(sess, n_gpus=int(args.gpus))
 
     # train one epoch
