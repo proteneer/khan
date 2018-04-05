@@ -241,15 +241,15 @@ def load_hdf5_files(
             E = data['energies']
             S = data['species']
             smi = data['smiles']
-
-            print("Processing: ", P)
+            
+            #print("Processing: ", P)
 
             path = P.split("/")[-1]
 
             Z = convert_species_to_atomic_nums(S)
 
             if len(Z) > MAX_ATOM_LIMIT:
-                print("skipipng")
+                print("skippng", P, 'n_atoms too large:', len(Z), '>', MAX_ATOM_LIMIT)
                 continue
 
             minimum_wb97 = np.amin(E)

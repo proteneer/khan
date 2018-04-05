@@ -117,7 +117,7 @@ class TrainerMultiGPU():
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
-                    epsilon=1e-8) # change defaults
+                    epsilon=1e-3) # change defaults
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.1))

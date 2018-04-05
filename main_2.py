@@ -22,6 +22,7 @@ def main():
 
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
+    parser.add_argument('--restart', default=False, action='store_true', help="Whether to restart from the save dir")
 
     args = parser.parse_args()
 
@@ -38,6 +39,9 @@ def main():
     CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
 
     save_dir = os.path.join(ANI_WORK_DIR, "save")
+    if os.path.isdir(save_dir) and not args.restart:
+        print('save_dir', save_dir, 'exists and this is not a restart job')
+        exit()
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
