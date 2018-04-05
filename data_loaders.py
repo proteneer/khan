@@ -58,28 +58,14 @@ class DataLoader():
             calibration_map=cal_map,
             use_fitted=self.use_fitted)
 
+        if ff_train_dir is not None:
+            ff_train_Xs, ff_train_ys, _ = data_utils.load_ff_files(ff_train_dir, use_fitted=self.use_fitted)
+            Xs.extend(ff_train_Xs)
+            ys.extend(ff_train_ys)
+
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
 
         return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
-
-
-        # if ff_train_dir is not None:
-        #     ff_train_Xs, ff_train_ys = data_utils.load_ff_files(ff_train_dir, use_fitted=self.use_fitted)
-        #     Xs.extend(ff_train_Xs) # add training data here
-        #     ys.extend(ff_train_ys)
-
-        # Xs, ys = sklearn.utils.shuffle(Xs, ys) # no need to shuffle anymore since we shuffle inside the
-
-        # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25)
-
-        # rd_train = RawDataset(X_train, y_train)
-        # rd_test  = RawDataset(X_test,  y_test)
-        # print("--------------train length", len(X_train))
-        # fd_train = rd_train.featurize(self.batch_size, feat_dir_train)
-        # print("--------------test length", len(X_test))
-        # fd_test = rd_test.featurize(self.batch_size, feat_dir_test)
-
-        # return fd_train, fd_test
 
     def load_gdb11(self,
         data_dir,
@@ -100,12 +86,5 @@ class DataLoader():
         return RawDataset(X_gdb11, y_gdb11)
 
     def load_ff(self, data_dir):
-
-        # ff_groups = data_utils.load_ff_files_groups(data_dir, use_fitted=self.use_fitted)
-
         ff_test_Xs, ff_test_ys, ff_groups = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
-
-
-
-
         return RawDataset(ff_test_Xs, ff_test_ys), ff_groups

@@ -151,9 +151,21 @@ def main():
 
 
 if __name__ == "__main__":
+
+    from tensorflow.python.client import device_lib
+
+    def get_available_gpus():
+        local_device_protos = device_lib.list_local_devices()
+        return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
+    avail_gpus = get_available_gpus()
+
+    print("Available GPUs:", avail_gpus)
+
+    if len(avail_gpus) == 0:
+        raise Exception("No GPUs available to this tensorflow process.")
+
     main()
-
-
 
 
 
