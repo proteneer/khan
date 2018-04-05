@@ -2,6 +2,8 @@ import os
 import numpy as np
 import time
 import tensorflow as tf
+from tensorflow.python.client import device_lib
+
 
 from khan.training.trainer import Trainer, flatten_results
 from khan.training.trainer_multi_gpu import TrainerMultiGPU, flatten_results
@@ -11,6 +13,11 @@ from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import argparse
+
+
+def get_available_gpus():
+    local_device_protos = device_lib.list_local_devices()
+    return [x.name for x in local_device_protos if x.device_type == 'GPU']
 
 def main():
 
@@ -25,6 +32,14 @@ def main():
     parser.add_argument('--restart', default=False, action='store_true', help="Whether to restart from the save dir")
 
     args = parser.parse_args()
+
+
+    avail_gpus = get_available_gpus()
+
+    print("Available GPUs:", avail_gpus)
+
+    if int(args.gpus) > len(avail_gpus):
+        raise Exception("Not enough GPUs available to this tensorflow process, requested: %d, available: %d" % (int(args.gpus), len(avail_gpus)))
 
     print("Arguments", args)
 
@@ -156,18 +171,7 @@ def main():
 
 if __name__ == "__main__":
 
-    from tensorflow.python.client import device_lib
 
-    def get_available_gpus():
-        local_device_protos = device_lib.list_local_devices()
-        return [x.name for x in local_device_protos if x.device_type == 'GPU']
-
-    avail_gpus = get_available_gpus()
-
-    print("Available GPUs:", avail_gpus)
-
-    if len(avail_gpus) == 0:
-        raise Exception("No GPUs available to this tensorflow process.")
 
     main()
 
