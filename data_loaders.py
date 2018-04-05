@@ -22,58 +22,36 @@ def load_calibration_file(calibration_file):
 
 class DataLoader():
 
-    def __init__(self,
-        use_fitted,
-        batch_size=1024,
-        prod=False):
-
+    def __init__(self, use_fitted, batch_size=1024):
+        """
+        Helper class used to load various datasets.
+        """
         self.batch_size = batch_size
         self.use_fitted = use_fitted
-        self.prod = prod
+
+        if self.use_fitted:
+            raise Exception("using fitted parameters is not supported right now")
 
     def load_gdb8(self,
         data_dir,
         calibration_file,
         ff_train_dir=None):
 
-        # feat_dir_train = os.path.join(feat_dir, "train")
-        # feat_dir_test = os.path.join(feat_dir, "test")
+        gdb_files = [
+            os.path.join(data_dir, "ani_gdb_s01.h5"),
+            os.path.join(data_dir, "ani_gdb_s02.h5"),
+            os.path.join(data_dir, "ani_gdb_s03.h5"),
+            os.path.join(data_dir, "ani_gdb_s04.h5"),
+            os.path.join(data_dir, "ani_gdb_s05.h5"),
+            os.path.join(data_dir, "ani_gdb_s06.h5"),
+            os.path.join(data_dir, "ani_gdb_s07.h5"),
+            os.path.join(data_dir, "ani_gdb_s08.h5"),
+        ]
 
-        # if os.path.exists(feat_dir):
-        #     fd_train = FeaturizedDataset(feat_dir_train)
-        #     fd_test = FeaturizedDataset(feat_dir_test)
-        #     return fd_train, fd_test
-
-        if self.prod:
-            gdb_files = [
-                os.path.join(data_dir, "ani_gdb_s01.h5"),
-                os.path.join(data_dir, "ani_gdb_s02.h5"),
-                os.path.join(data_dir, "ani_gdb_s03.h5"),
-                os.path.join(data_dir, "ani_gdb_s04.h5"),
-                os.path.join(data_dir, "ani_gdb_s05.h5"),
-                os.path.join(data_dir, "ani_gdb_s06.h5"),
-                os.path.join(data_dir, "ani_gdb_s07.h5"),
-                os.path.join(data_dir, "ani_gdb_s08.h5"),
-            ]
-        else:
-
-            gdb_files = [
-                os.path.join(data_dir, "ani_gdb_s01.h5"),
-                os.path.join(data_dir, "ani_gdb_s02.h5"),
-                os.path.join(data_dir, "ani_gdb_s03.h5"),
-                os.path.join(data_dir, "ani_gdb_s04.h5"),
-                os.path.join(data_dir, "ani_gdb_s05.h5"),
-                os.path.join(data_dir, "ani_gdb_s06.h5"),
-                os.path.join(data_dir, "ani_gdb_s07.h5"),
-                os.path.join(data_dir, "ani_gdb_s08.h5"),
-            ]
-
-            # gdb_files = [os.path.join(data_dir, "ani_gdb_s03.h5")]
-
-            Xs, ys = data_utils.load_hdf5_files(
-                gdb_files,
-                calibration_map=load_calibration_file(calibration_file),
-                use_fitted=self.use_fitted)
+        Xs, ys = data_utils.load_hdf5_files(
+            gdb_files,
+            calibration_map=load_calibration_file(calibration_file),
+            use_fitted=self.use_fitted)
 
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
 

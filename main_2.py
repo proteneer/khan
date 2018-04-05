@@ -77,6 +77,8 @@ def main():
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
             trainer.load(save_dir)
+        else:
+            trainer.initialize() # initialize to random variables
 
         print("Evaluating Rotamer Errors:")
 
