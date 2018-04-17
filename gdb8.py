@@ -52,7 +52,10 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        trainer = TrainerMultiGPU(sess, n_gpus=int(args.gpus))
+        trainer = TrainerMultiGPU(
+            sess,
+            n_gpus=int(args.gpus),
+            layer_sizes=(128, 128, 64, 1))
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
