@@ -45,7 +45,7 @@ class DataLoader():
             os.path.join(data_dir, "ani_gdb_s05.h5"),
             os.path.join(data_dir, "ani_gdb_s06.h5"),
             os.path.join(data_dir, "ani_gdb_s07.h5"),
-            os.path.join(data_dir, "ani_gdb_s08.h5"),
+            # os.path.join(data_dir, "ani_gdb_s08.h5"),
         ]
 
         if calibration_file:

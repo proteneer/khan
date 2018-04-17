@@ -13,12 +13,35 @@
 
 #include <chrono>
 
+#include "parameters.h"
 #include "kernel.cuh"
 
 using namespace tensorflow;
 
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
+
+namespace black_magic
+{
+    template<unsigned... digits>
+    struct to_chars { static const char value[]; };
+
+    template<unsigned... digits>
+    const char to_chars<digits...>::value[] = {('0' + digits)..., 0};
+
+    template<unsigned rem, unsigned... digits>
+    struct explode : explode<rem / 10, rem % 10, digits...> {};
+
+    template<unsigned... digits>
+    struct explode<0, digits...> : to_chars<digits...> {};
+}
+
+template<unsigned num>
+struct num_to_string : black_magic::explode<num / 10, num % 10> {};
+
+
+std::string a1("feature_size: int = ");
+std::string a2(num_to_string<TOTAL_FEATURE_SIZE>::value);
 
 REGISTER_OP("Ani")
   .Input("xs: float32")
@@ -33,6 +56,7 @@ REGISTER_OP("Ani")
   .Output("c_feat: float32")
   .Output("n_feat: float32")
   .Output("o_feat: float32")
+  .Attr(a1+a2)
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
     // the output shapes are determined by the number of elements in acs
     // c->set_output(0, c->input(0));
@@ -58,6 +82,7 @@ class AniOp : public OpKernel {
  public:
   explicit AniOp(OpKernelConstruction* context) : OpKernel(context) {
     // empty constructor
+
   }
 
   void Compute(OpKernelContext* context) override {
@@ -90,29 +115,29 @@ class AniOp : public OpKernel {
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "h_feat",
-      TensorShape({acs[0]*384}),
+      TensorShape({acs[0]*TOTAL_FEATURE_SIZE}),
       &X_feat_H)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "c_feat",
-      TensorShape({acs[1]*384}),
+      TensorShape({acs[1]*TOTAL_FEATURE_SIZE}),
       &X_feat_C)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "n_feat",
-      TensorShape({acs[2]*384}),
+      TensorShape({acs[2]*TOTAL_FEATURE_SIZE}),
       &X_feat_N)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "o_feat",
-      TensorShape({acs[3]*384}),
+      TensorShape({acs[3]*TOTAL_FEATURE_SIZE}),
       &X_feat_O)
     );
 
-    gpuErrchk(cudaMemsetAsync(X_feat_H->flat<float>().data(), 0, acs[0]*384*sizeof(int), d.stream()));
-    gpuErrchk(cudaMemsetAsync(X_feat_C->flat<float>().data(), 0, acs[1]*384*sizeof(int), d.stream()));
-    gpuErrchk(cudaMemsetAsync(X_feat_N->flat<float>().data(), 0, acs[2]*384*sizeof(int), d.stream()));
-    gpuErrchk(cudaMemsetAsync(X_feat_O->flat<float>().data(), 0, acs[3]*384*sizeof(int), d.stream()));
+    gpuErrchk(cudaMemsetAsync(X_feat_H->flat<float>().data(), 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
+    gpuErrchk(cudaMemsetAsync(X_feat_C->flat<float>().data(), 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
+    gpuErrchk(cudaMemsetAsync(X_feat_N->flat<float>().data(), 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
+    gpuErrchk(cudaMemsetAsync(X_feat_O->flat<float>().data(), 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
 
     if(n_mols > 0) {
       // gpu kernel's can't be launched with a zero blockdim
@@ -132,11 +157,9 @@ class AniOp : public OpKernel {
       );
       gpuErrchk(cudaPeekAtLastError());
     }
-    
-
-
 
   }
 };
+
 
 REGISTER_KERNEL_BUILDER(Name("Ani").Device(DEVICE_GPU).HostMemory("acs"), AniOp);

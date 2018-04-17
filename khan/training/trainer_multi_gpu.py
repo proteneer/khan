@@ -135,6 +135,13 @@ class TrainerMultiGPU():
             self.all_models = []
             self.tower_exp_loss = []
 
+
+            # print(dir(ani_mod.ani))
+
+            # self.layer_sizes = (ani_mod.ani.__getattribute__("feat_size"), 256, 128, 64, 1)
+
+            # print(self.layer_sizes)
+
             with tf.variable_scope(tf.get_variable_scope()):
                 for gpu_idx in range(self.num_gpus):
                     with tf.device('/gpu:%d' % gpu_idx):
@@ -157,21 +164,28 @@ class TrainerMultiGPU():
                                     mol_offsets,
                                     mol_atom_counts,
                                     scatter_idxs,
-                                    atom_counts
+                                    atom_counts,
+                                    name="ani_op_"+str(gpu_idx)
                                 )
+                                feat_size = f0.op.get_attr("feature_size")
 
                                 # TODO: optimize in C++ code directly to avoid reshape
-                                f0 = tf.reshape(f0, (-1, 384))
-                                f1 = tf.reshape(f1, (-1, 384))
-                                f2 = tf.reshape(f2, (-1, 384))
-                                f3 = tf.reshape(f3, (-1, 384))
+                                f0 = tf.reshape(f0, (-1, feat_size))
+                                f1 = tf.reshape(f1, (-1, feat_size))
+                                f2 = tf.reshape(f2, (-1, feat_size))
+                                f3 = tf.reshape(f3, (-1, feat_size))
+
+                            layer_sizes = (feat_size, 256, 128, 64, 1)
+
 
                             tower_model = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
                                 mol_idxs=m_deq,
-                                layer_sizes=(384, 256, 128, 64, 1))
+                                layer_sizes=layer_sizes)
+
+
 
                             self.all_models.append(tower_model)
 
@@ -193,13 +207,10 @@ class TrainerMultiGPU():
             self.load_best_params_ops = []
 
             for var in tf.trainable_variables():
-
                 copy_name = "best_"+var.name.split(":")[0]
                 copy_shape = var.shape
                 copy_type = var.dtype
-
                 var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
-
                 self.best_params.append(var_copy)
                 self.save_best_params_ops.append(tf.assign(var_copy, var))
                 self.load_best_params_ops.append(tf.assign(var, var_copy))
