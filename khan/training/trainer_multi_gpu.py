@@ -175,8 +175,7 @@ class TrainerMultiGPU():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            layer_sizes = (feat_size, 256, 128, 64, 1)
-
+                            layer_sizes = (feat_size, 128, 128, 64, 1)
 
                             tower_model = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
