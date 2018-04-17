@@ -61,7 +61,7 @@ def average_gradients(tower_grads):
 
 class TrainerMultiGPU():
 
-    def __init__(self, sess, n_gpus=1):
+    def __init__(self, sess, n_gpus=1, layer_sizes=(128, 128, 64, 1)):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
@@ -135,13 +135,6 @@ class TrainerMultiGPU():
             self.all_models = []
             self.tower_exp_loss = []
 
-
-            # print(dir(ani_mod.ani))
-
-            # self.layer_sizes = (ani_mod.ani.__getattribute__("feat_size"), 256, 128, 64, 1)
-
-            # print(self.layer_sizes)
-
             with tf.variable_scope(tf.get_variable_scope()):
                 for gpu_idx in range(self.num_gpus):
                     with tf.device('/gpu:%d' % gpu_idx):
@@ -175,16 +168,12 @@ class TrainerMultiGPU():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            layer_sizes = (feat_size, 128, 128, 64, 1)
-
                             tower_model = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
                                 mol_idxs=m_deq,
-                                layer_sizes=layer_sizes)
-
-
+                                layer_sizes=(feat_size,) + layer_sizes)
 
                             self.all_models.append(tower_model)
 
