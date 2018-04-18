@@ -39,14 +39,13 @@ class AtomNN():
 
             with tf.device('/cpu:0'):
 
-                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=1.0/x), trainable=True)
+                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=6.0/x), trainable=True)
                 b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
 
             A = tf.matmul(self.As[-1], W) + b
-            if idx != len(layer_sizes) - 1:
-
-                A = tf.exp(-1*tf.pow(A, 2))                
-                # A = tf.exp(-A * A)
+            if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
+                A = tf.nn.leaky_relu(A) # leaky RELU activation
+                # A = tf.exp(-1*tf.pow(A, 2)) # Gaussian activation
 
             self.Ws.append(W)
             self.bs.append(b)

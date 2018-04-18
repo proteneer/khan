@@ -13,11 +13,20 @@ selfIxnNrgWB97 = np.array([
     -54.5680045287,
     -75.0362229210], dtype=np.float32)
 
+# DFT-calculated self-interaction, not linear fitted
+#selfIxnNrgMO62x = np.array([
+#   -0.498135,
+#   -37.841399,
+#   -54.586413,
+#   -75.062826,
+#], dtype=np.float32)
+
+# linear fitted self-interaction
 selfIxnNrgMO62x = np.array([
-   -0.498135,
-   -37.841399,
-   -54.586413,
-   -75.062826,
+-374.85 / HARTREE_TO_KCAL_PER_MOL, 
+-23898.1 / HARTREE_TO_KCAL_PER_MOL, 
+-34337.6 / HARTREE_TO_KCAL_PER_MOL, 
+-47188.0 / HARTREE_TO_KCAL_PER_MOL 
 ], dtype=np.float32)
 
 # import correction

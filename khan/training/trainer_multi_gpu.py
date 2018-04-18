@@ -117,10 +117,10 @@ class TrainerMultiGPU():
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
-                    epsilon=1e-3) # change defaults
+                    epsilon=1e-3) # default is 1e-8
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.1))
+            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.5))
             self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
@@ -213,7 +213,7 @@ class TrainerMultiGPU():
         max_norm_ops = []
 
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 6.0, axes=1)))
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
         self.max_norm_ops = max_norm_ops
