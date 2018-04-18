@@ -1,0 +1,7 @@
+nvcc --std=c++11 -arch=sm_61 -c functor_op_gpu.cu ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I /usr/local/ --expt-relaxed-constexpr
+nvcc --std=c++11 -arch=sm_61 -c kernel.cu ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I /usr/local/ --expt-relaxed-constexpr
+
+g++ -std=c++11 -c -O3 -Ofast -march=native -fPIC functor_op_cpu.cpp ${TF_CFLAGS[@]} ${TF_LFLAGS[@]}
+g++ -std=c++11 -c -O3 -Ofast -march=native -fPIC kernel_cpu.cpp ${TF_CFLAGS[@]} ${TF_LFLAGS[@]}
+
+g++ -std=c++11 -shared -o ani.so ani_op.cpp functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ${TF_CFLAGS[@]} -fPIC ${TF_LFLAGS[@]}

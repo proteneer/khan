@@ -170,7 +170,7 @@ __global__ void featurize(
         // }
 
         // radial features
-        if(r_ij < R_Rc and local_atom_idx < j) {
+        if(r_ij < R_Rc && local_atom_idx < j) {
             for(int r_idx = 0; r_idx < NUM_R_Rs; r_idx++) {
                 float summand = expf(-R_eta * powf(r_ij - R_Rs[r_idx], 2.0)) * f_C(r_ij, R_Rc);
 

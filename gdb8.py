@@ -4,7 +4,7 @@ import time
 import tensorflow as tf
 
 from khan.training.trainer import Trainer, flatten_results
-from khan.training.trainer_multi_gpu import TrainerMultiGPU, flatten_results
+from khan.training.trainer_multi_gpu import TrainerMultiTower, flatten_results
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
@@ -52,9 +52,11 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        trainer = TrainerMultiGPU(
+        towers = ["/cpu:0"]
+
+        trainer = TrainerMultiTower(
             sess,
-            n_gpus=int(args.gpus),
+            towers=towers,
             layer_sizes=(128, 128, 64, 1))
 
         if os.path.exists(save_dir):
