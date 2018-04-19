@@ -7,7 +7,7 @@ import tensorflow as tf
 import time
 
 ani_mod = tf.load_op_library('gpu_featurizer/ani.so');
-sort_lib = tf.load_op_library('gpu_featurizer/ani_sort.so');
+# sort_lib = tf.load_op_library('gpu_featurizer/ani_sort.so');
 
 
 import khan
@@ -59,9 +59,13 @@ def average_gradients(tower_grads):
     return average_grads
 
 
-class TrainerMultiGPU():
+class TrainerMultiTower():
 
-    def __init__(self, sess, n_gpus=1, layer_sizes=(128, 128, 64, 1)):
+    def __init__(self,
+        sess,
+        towers,
+        layer_sizes=(128, 128, 64, 1)
+    ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
@@ -76,9 +80,10 @@ class TrainerMultiGPU():
 
         """
 
-        self.num_gpus = n_gpus
+        self.towers = towers
+        self.num_towers = len(towers)
 
-        assert self.num_gpus > 0
+        assert self.num_towers > 0
 
         self.x_enq = tf.placeholder(dtype=tf.float32)
         self.y_enq = tf.placeholder(dtype=tf.float32)
@@ -88,7 +93,7 @@ class TrainerMultiGPU():
         self.yt_enq = tf.placeholder(dtype=tf.float32)
         self.bi_enq = tf.placeholder(dtype=tf.int32)
 
-        queue = tf.FIFOQueue(capacity=20*self.num_gpus, dtypes=[
+        queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=[
                 tf.float32,  # Xs
                 tf.float32,  # Ys
                 tf.float32,  # Zs
@@ -136,9 +141,10 @@ class TrainerMultiGPU():
             self.tower_exp_loss = []
 
             with tf.variable_scope(tf.get_variable_scope()):
-                for gpu_idx in range(self.num_gpus):
-                    with tf.device('/gpu:%d' % gpu_idx):
-                        with tf.name_scope("%s_%d" % ("tower", gpu_idx)) as scope:
+                # for gpu_idx in range(self.num_gpus):
+                for tower_idx, tower_device in enumerate(towers):
+                    with tf.device(tower_device):
+                        with tf.name_scope("%s_%d" % ("tower", tower_idx)) as scope:
 
                             with tf.device('/cpu:0'):
                                 get_op = queue.dequeue()
@@ -146,10 +152,10 @@ class TrainerMultiGPU():
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
-                                scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(a_deq)
+                                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
 
-                            with tf.device('/gpu:%d' % gpu_idx):
-                                f0, f1, f2, f3 = ani_mod.ani(
+                            with tf.device(tower_device):
+                                f0, f1, f2, f3 = ani_mod.featurize(
                                     x_deq,
                                     y_deq,
                                     z_deq,
@@ -158,7 +164,7 @@ class TrainerMultiGPU():
                                     mol_atom_counts,
                                     scatter_idxs,
                                     atom_counts,
-                                    name="ani_op_"+str(gpu_idx)
+                                    name="ani_op_"+str(tower_idx)
                                 )
                                 feat_size = f0.op.get_attr("feature_size")
 
@@ -212,7 +218,7 @@ class TrainerMultiGPU():
         max_norm_ops = []
 
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
         self.max_norm_ops = max_norm_ops
@@ -374,11 +380,12 @@ class TrainerMultiGPU():
             # bid0  1 1 1
             # bid1  1 1 0
 
-            n_batches = dataset.num_batches(batch_size)
+            try:
 
-            for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
-                atom_types = (mol_xs[:, 0]).astype(np.int32)
-                try:
+                n_batches = dataset.num_batches(batch_size)
+
+                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
+                    atom_types = (mol_xs[:, 0]).astype(np.int32)
                     self.sess.run(self.put_op, feed_dict={
                         self.x_enq: mol_xs[:, 1],
                         self.y_enq: mol_xs[:, 2],
@@ -389,32 +396,31 @@ class TrainerMultiGPU():
                         self.bi_enq: b_idx
                     })
                     g_b_idx += 1
-                except Exception as e:
-                    print("EEEEE", e)
 
-            remainder = n_batches % self.num_gpus
-            if remainder:
-                for _ in range(self.num_gpus - remainder):
-                    self.sess.run(self.put_op, feed_dict={
-                        self.x_enq: np.zeros((0, 1), dtype=np.float32),
-                        self.y_enq: np.zeros((0, 1), dtype=np.float32),
-                        self.z_enq: np.zeros((0, 1), dtype=np.float32),
-                        self.a_enq: np.zeros((0, ), dtype=np.int32),
-                        self.m_enq: np.zeros((0, ), dtype=np.int32),
-                        self.yt_enq: np.zeros((0, )),
-                        self.bi_enq: b_idx,
-                    })
-                    b_idx += 1
-        
+                remainder = n_batches % self.num_towers
+                if remainder:
+                    for _ in range(self.num_towers - remainder):
+                        self.sess.run(self.put_op, feed_dict={
+                            self.x_enq: np.zeros((0, 1), dtype=np.float32),
+                            self.y_enq: np.zeros((0, 1), dtype=np.float32),
+                            self.z_enq: np.zeros((0, 1), dtype=np.float32),
+                            self.a_enq: np.zeros((0, ), dtype=np.int32),
+                            self.m_enq: np.zeros((0, ), dtype=np.int32),
+                            self.yt_enq: np.zeros((0, )),
+                            self.bi_enq: b_idx,
+                        })
+                        b_idx += 1
+            except Exception as e:
+                print("QueueError:", e)
+
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)
 
         results = []
-        n_gpu_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_gpus)
+        n_tower_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_towers)
 
-        for i in range(n_gpu_batches):
+        for i in range(n_tower_batches):
             res = self.sess.run(target_ops)
             results.append(res)
-
 
         return results

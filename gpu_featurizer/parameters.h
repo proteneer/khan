@@ -1,4 +1,13 @@
 
+
+#ifndef PARAMETERS_H_
+#define PARAMETERS_H_
+
+#ifdef GOOGLE_CUDA
+    #define CONSTANT_FLAGS __device__
+#else
+    #define CONSTANT_FLAGS
+#endif
 /* from github repo */
 // const int MAX_ATOM_TYPES = 4;
 
@@ -18,7 +27,7 @@
 
 // const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
-// __device__ const float R_Rs[NUM_R_Rs] = {
+// CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
 //     5.0000000e-01,
 //     7.5625000e-01,
 //     1.0125000e+00,
@@ -37,7 +46,7 @@
 //     4.3437500e+00
 // };
 
-// __device__ const float A_thetas[NUM_A_THETAS] = {
+// CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
 //     0.0000000e+00,
 //     7.8539816e-01,
 //     1.5707963e+00,
@@ -48,7 +57,7 @@
 //     5.4977871e+00
 // };
 
-// __device__ const float A_Rs[NUM_A_RS] = {
+// CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
 //     5.0000000e-01,
 //     1.1500000e+00,
 //     1.8000000e+00,
@@ -63,7 +72,7 @@ const int MAX_ATOM_TYPES = 4;
 const int NUM_R_Rs = 32;
 const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
 
-const float R_eta = NUM_R_Rs;
+const float R_eta = 16.0;
 const float R_Rc = 4.6;
 
 const float A_Rc = 3.1;
@@ -77,7 +86,7 @@ const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MA
 const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
 // portably transfer over to CPU code?
-__device__ const float R_Rs[NUM_R_Rs] = {
+CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
     0.13939394,
     0.27878788,
     0.41818182,
@@ -112,7 +121,7 @@ __device__ const float R_Rs[NUM_R_Rs] = {
     4.46060606
 };
 
-__device__ const float A_thetas[NUM_A_THETAS] = {
+CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
     0.0000000e+00,
     7.8539816e-01,
     1.5707963e+00,
@@ -123,7 +132,7 @@ __device__ const float A_thetas[NUM_A_THETAS] = {
     5.4977871e+00
 };
 
-__device__ const float A_Rs[NUM_A_RS] = {
+CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
     0.34444444,
     0.68888889,
     1.03333333,
@@ -133,3 +142,6 @@ __device__ const float A_Rs[NUM_A_RS] = {
     2.41111111,
     2.75555556
 };
+
+
+#endif
