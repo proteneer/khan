@@ -4,11 +4,13 @@ import time
 import tensorflow as tf
 
 from khan.training.trainer import Trainer, flatten_results
-from khan.training.trainer_multi_gpu import TrainerMultiTower, flatten_results
+from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
+
+import multiprocessing
 
 import argparse
 
@@ -52,7 +54,14 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        towers = ["/cpu:0"]
+
+        n_gpus = int(args.gpus)
+        if n_gpus > 0:
+            towers = ["/gpu:"+str(i) for i in range(n_gpus)]
+        else:
+            towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
+
+        print("towers:", towers)
 
         trainer = TrainerMultiTower(
             sess,
