@@ -38,8 +38,6 @@ void AniFunctor<GPUDevice>::operator()(
     float *X_feat_out_O,
     const int *acs) {
 
-    std::cout << "RUNNING ON GPU.." << std::endl;
-
     gpuErrchk(cudaMemsetAsync(X_feat_out_H, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
     gpuErrchk(cudaMemsetAsync(X_feat_out_C, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
     gpuErrchk(cudaMemsetAsync(X_feat_out_N, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));

@@ -32,19 +32,25 @@ if __name__ == "__main__":
     y = atom_matrix[:, 2]
     z = atom_matrix[:, 3]
 
-    scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(atom_types)
+    ph_atom_types = tf.placeholder(dtype=np.int32)
+    ph_xs = tf.placeholder(dtype=np.float32)
+    ph_ys = tf.placeholder(dtype=np.float32)
+    ph_zs = tf.placeholder(dtype=np.float32)
+    ph_mol_idxs = tf.placeholder(dtype=np.int32)
 
-    mol_atom_counts = tf.segment_sum(tf.ones_like(mol_idxs), mol_idxs)
+    scatter_idxs, _, atom_counts = sort_lib.ani_sort(ph_atom_types)
+
+    mol_atom_counts = tf.segment_sum(tf.ones_like(ph_mol_idxs), ph_mol_idxs)
     mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
-    obtained_si, obtained_gi, obtained_ac = sess.run([scatter_idxs, gather_idxs, atom_counts])
+    # obtained_si, obtained_gi, obtained_ac = sess.run([scatter_idxs, gather_idxs, atom_counts])
 
     with tf.device('/device:GPU:0'):
         f0, f1, f2, f3 = ani_mod.featurize(
-            x,
-            y,
-            z,
-            atom_types,
+            ph_xs,
+            ph_ys,
+            ph_zs,
+            ph_atom_types,
             mol_offsets,
             mol_atom_counts,
             scatter_idxs,
@@ -54,4 +60,10 @@ if __name__ == "__main__":
         # commenting out the reshape line allows the code to run correctly on the GPU
         f0, f1, f2, f3 = tf.reshape(f0, (-1, 384)), tf.reshape(f1, (-1, 384)), tf.reshape(f2, (-1, 384)), tf.reshape(f3, (-1, 384))
 
-    obtained_features = sess.run([f0, f1, f2, f3])
+    obtained_features = sess.run([f0, f1, f2, f3], feed_dict={
+        ph_atom_types: atom_types,
+        ph_mol_idxs: mol_idxs,
+        ph_xs: x,
+        ph_ys: y,
+        ph_zs: z,
+    })

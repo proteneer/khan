@@ -1,7 +1,5 @@
-
 #include <math.h>
 #include "parameters.h"
-
 
 static inline float dist_diff(float dx, float dy, float dz) {
 
@@ -116,7 +114,7 @@ void featurize_cpu(
                 float A_f_C_ij = f_C(r_ij, A_Rc);
 
                 if(r_ij < A_Rc) {
-                    for(int k_idx = 0; k_idx < num_atoms; k_idx++) {
+                    for(int k_idx = j_idx+1; k_idx < num_atoms; k_idx++) {
                         if(i_idx == j_idx || i_idx == k_idx || j_idx == k_idx) {
                             continue;
                         }

@@ -25,9 +25,6 @@ void AniFunctor<CPUDevice>::operator()(
     float *X_feat_out_O,
     const int *acs) {
 
-
-    std::cout << "RUNNING ON CPU!!" << std::endl;
-
     memset(X_feat_out_H, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int));
     memset(X_feat_out_C, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int));
     memset(X_feat_out_N, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int));
