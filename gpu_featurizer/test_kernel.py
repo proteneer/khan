@@ -5,15 +5,12 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import tensorflow as tf
-from tensorflow.python.client import timeline
 import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
 sort_lib = tf.load_op_library('ani_sort.so');
 
 from tensorflow.python import debug as tf_debug
-
-
 
 
 def linearize(i, j, k, l):
@@ -50,7 +47,9 @@ class TestFeaturizer(unittest.TestCase):
 
     def setUp(self):
 
-        self.sess = tf.Session()
+        cp = tf.ConfigProto(log_device_placement=True, allow_soft_placement=False, device_count = {'GPU': 1})
+
+        self.sess = tf.Session(config=cp)
 
     def tearDown(self):
 
@@ -172,6 +171,8 @@ class TestFeaturizer(unittest.TestCase):
 
 
     def test_featurizer(self):
+
+
         atom_matrix = np.array([
             [0, 1.0, 2.0, 3.0], # H
             [2, 2.0, 1.0, 4.0], # N
@@ -199,14 +200,21 @@ class TestFeaturizer(unittest.TestCase):
         mol_atom_counts = tf.segment_sum(tf.ones_like(mol_idxs), mol_idxs)
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
-
         obtained_si, obtained_gi, obtained_ac = self.sess.run([scatter_idxs, gather_idxs, atom_counts])
+
+
 
         np.testing.assert_array_equal(obtained_ac, [6,2,3,0])
         np.testing.assert_array_equal(obtained_si, [0,0,1,0,1,2,3,4,5,1,2])
         np.testing.assert_array_equal(obtained_gi, [0,8,1,6,9,2,3,4,5,7,10])
 
-        f0, f1, f2, f3 = ani_mod.ani(
+        # from tensorflow.python.client import device_lib
+        # local_device_protos = device_lib.list_local_devices()
+        # print([x.name for x in local_device_protos if x.device_type == 'GPU'])
+
+        # with tf.device('/device:GPU:0'):
+
+        f0, f1, f2, f3 = ani_mod.featurize(
             x,
             y,
             z,
@@ -221,6 +229,9 @@ class TestFeaturizer(unittest.TestCase):
         scattered_features = tf.concat([f0, f1, f2, f3], axis=0)
         features = tf.gather(scattered_features, gather_idxs)
 
+
+        # with tf.device('/device:GPU:0'):
+            
         obtained_features = self.sess.run(features)
         # feats = self.sess.run(scattered_features)
 
