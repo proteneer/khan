@@ -59,37 +59,14 @@ Requirements:
 - CUDA-enabled GPU
 - Modern C++11 compatible gcc
 
-Aside from the dependencies in the requirements.txt file, you will need to build two custom ops:
-
-- gpu_featurizer/fast_split_sort_gather.cpp -> mod.ani_sort()
-- gpu_featurizer/ani_op.cc.cu -> mod.ani()
-
-These two custom kernels significantly improve the training speed by offloading parts of the
-featurization algorithm directly onto the GPU, while retaining a tensorflow-based ecosystem.
-
-The recommended build flags for the fast_split_sort_gather.cpp:
-
-``` bash
-g++ -std=c++11 -shared fast_split_sort_gather.cpp -o ani_sort.so -fPIC ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} \
- -O3 -Ofast -march=native -ltensorflow_framework
-```
-
-and for ani_op.cc.cu:
-
-``` bash
-nvcc -std=c++11 -arch=sm_61 -shared ani_op.cc.cu kernel.cu -o ani.so ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} \
- -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I CUDA_INCLUDE_DIR --expt-relaxed-constexpr -ltensorflow_framework
-```
-
-It is critically important that the TF_*FLAGS be set to the corresponding virtualenv in which
-tensorflow itself is installed in:
+Refer to the Makefile for build instructions. The TF_CFLAGS and TF_LFLAGS can be found according to:
 
 ``` bash
 TF_CFLAGS=( $(python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))') )
 TF_LFLAGS=( $(python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))') )
 ```
 
-The built .so files should be placed inside the gpu_featurizer dir directly.
+This will generate an ani.so file that includes both the sorting routing as well as the featurization.
 
 ## Example Run
 

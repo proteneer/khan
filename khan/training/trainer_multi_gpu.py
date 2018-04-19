@@ -7,7 +7,7 @@ import tensorflow as tf
 import time
 
 ani_mod = tf.load_op_library('gpu_featurizer/ani.so');
-sort_lib = tf.load_op_library('gpu_featurizer/ani_sort.so');
+# sort_lib = tf.load_op_library('gpu_featurizer/ani_sort.so');
 
 
 import khan
@@ -152,10 +152,10 @@ class TrainerMultiTower():
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
-                                scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(a_deq)
+                                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
 
                             with tf.device(tower_device):
-                                f0, f1, f2, f3 = ani_mod.ani(
+                                f0, f1, f2, f3 = ani_mod.featurize(
                                     x_deq,
                                     y_deq,
                                     z_deq,

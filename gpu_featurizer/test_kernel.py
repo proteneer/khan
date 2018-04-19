@@ -8,7 +8,7 @@ import tensorflow as tf
 import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
-sort_lib = tf.load_op_library('ani_sort.so');
+# sort_lib = tf.load_op_library('ani_sort.so');
 
 from tensorflow.python import debug as tf_debug
 
@@ -161,12 +161,7 @@ class TestFeaturizer(unittest.TestCase):
 
             all_feats.append(np.concatenate([radial_feats, angular_feats]))
 
-
         return np.array(all_feats)
-
-        # A_Rc = 3.1;
-        # A_eta = 6.0;
-        # A_zeta = 8.0;
 
 
 
@@ -201,7 +196,7 @@ class TestFeaturizer(unittest.TestCase):
         ph_zs = tf.placeholder(dtype=np.float32)
         ph_mol_idxs = tf.placeholder(dtype=np.int32)
 
-        scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(ph_atom_types)
+        scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(ph_atom_types)
 
         mol_atom_counts = tf.segment_sum(tf.ones_like(ph_mol_idxs), ph_mol_idxs)
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
@@ -239,7 +234,6 @@ class TestFeaturizer(unittest.TestCase):
             ph_mol_idxs: mol_idxs,
             ph_atom_types: atom_types
         })
-        # feats = self.sess.run(scattered_features)
 
         expected_features_mol1 = self.reference_feats(atom_matrix[:8, :])
         expected_features_mol2 = self.reference_feats(atom_matrix[8:, :])
