@@ -35,8 +35,8 @@ def main():
 
         parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted energy corrections")
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
-        parser.add_argument('--gpus', default=8, help="Number of gpus to use")
-        parser.add_argument('--batch_size', default='1024', help="How many training points to consider before calculating each gradient")
+        parser.add_argument('--gpus', default=4, help="Number of gpus to use")
+        parser.add_argument('--batch_size', default='256', help="How many training points to consider before calculating each gradient")
         parser.add_argument('--max_local_epoch_count', default='30', help="How many epochs to try each learning rate before reducing it")
 
         parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
@@ -49,11 +49,12 @@ def main():
 
         ANI_TRAIN_DIR = args.train_dir
         ANI_WORK_DIR = args.work_dir
+        GRAPH_DB_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/'
 
         CALIBRATION_FILE_TRAIN = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
         CALIBRATION_FILE_TEST = os.path.join(ANI_TRAIN_DIR, "gdb_11_cal.txt")
-        ROTAMER_TRAIN_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/train")
-        ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
+        ROTAMER_TRAIN_DIR = [ os.path.join(ANI_TRAIN_DIR, "rotamers/train"), os.path.join(ANI_TRAIN_DIR, "rotamers/test") ]
+        ROTAMER_TEST_DIR = GRAPH_DB_DIR
         CHARGED_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "charged_rotamers_2")
         CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
 
@@ -102,8 +103,8 @@ def main():
             # TODo: allow changing learning rate here
             #trainer.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False) # if restart should have different learning rate
         else: # initialize new random weights. If weights give crazy energies that might break convergence, just try again. 
-            acceptable_start_rmse = 150.0
-            for attempt_count in range(300):
+            acceptable_start_rmse = 200.0
+            for attempt_count in range(100):
                 trainer.initialize() # initialize to random variables
                 test_err = trainer.eval_abs_rmse(rd_ffneutral_mo62x)
                 print('Initial error from random weights: %.1f kcal/mol, acceptable limit: %.1f' % (test_err, acceptable_start_rmse) )
@@ -117,13 +118,14 @@ def main():
         
         print("------------Load training data--------------")
         
-        pickle_file = "gdb8_graphdb_xy.pickle"
+        pickle_files = ["gdb8_fftrain_fftest_xy.pickle", "gdb8_graphdb_xy.pickle", "gdb8_xy.pickle", "gdb7_xy.pickle"]
+        pickle_file = pickle_files[0]
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             Xs, ys = pickle.load( open(pickle_file, "rb") )
         else:
             if add_ffdata:
-                ff_train_dir = ['/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/'] # ROTAMER_TRAIN_DIR
+                ff_train_dir = ROTAMER_TRAIN_DIR
             else:
                 ff_train_dir = None
             Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
@@ -142,16 +144,14 @@ def main():
         start_time = time.time()
         best_test_score = None
         while sess.run(trainer.learning_rate) > 1e-9:
+            if best_test_score is None: # start testing
+                # generate new train and validation split at every training round?
+                X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.2) # stratify by UTT would be good to try here
+                rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+                print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
+                best_test_score = trainer.eval_abs_rmse(rd_test)
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
-                # generate new train and validation split at every training round
-                #start_split_time = time.time()
-                if best_test_score is None: # start testing
-                    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.3) # stratify by UTT would be good to try here
-                    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
-                    print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
-                    best_test_score = trainer.eval_abs_rmse(rd_test)
-                #print('Split time: %.2fs' % (time.time()-start_split_time) )
                 for step in range(1): # how many rounds to perform before checking test rmse
                     train_step_time = time.time()
                     train_results = trainer.feed_dataset(
@@ -200,5 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

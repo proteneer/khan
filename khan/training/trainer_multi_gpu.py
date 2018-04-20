@@ -213,7 +213,7 @@ class TrainerMultiGPU():
         max_norm_ops = []
 
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 6.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 5.0, axes=1)))
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
         self.max_norm_ops = max_norm_ops

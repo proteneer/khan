@@ -39,7 +39,7 @@ class AtomNN():
 
             with tf.device('/cpu:0'):
 
-                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=6.0/x), trainable=True)
+                W = tf.get_variable("W"+name, (x, y), np.float32, tf.random_normal_initializer(mean=0, stddev=5.0/x), trainable=True)
                 b = tf.get_variable("b"+name, (y), np.float32, tf.zeros_initializer, trainable=True)
 
             A = tf.matmul(self.As[-1], W) + b
