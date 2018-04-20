@@ -5,15 +5,12 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import tensorflow as tf
-from tensorflow.python.client import timeline
 import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
-sort_lib = tf.load_op_library('ani_sort.so');
+# sort_lib = tf.load_op_library('ani_sort.so');
 
 from tensorflow.python import debug as tf_debug
-
-
 
 
 def linearize(i, j, k, l):
@@ -50,7 +47,9 @@ class TestFeaturizer(unittest.TestCase):
 
     def setUp(self):
 
-        self.sess = tf.Session()
+        cp = tf.ConfigProto(log_device_placement=True, allow_soft_placement=False, device_count = {'GPU': 1})
+
+        self.sess = tf.Session(config=cp)
 
     def tearDown(self):
 
@@ -162,16 +161,13 @@ class TestFeaturizer(unittest.TestCase):
 
             all_feats.append(np.concatenate([radial_feats, angular_feats]))
 
-
         return np.array(all_feats)
-
-        # A_Rc = 3.1;
-        # A_eta = 6.0;
-        # A_zeta = 8.0;
 
 
 
     def test_featurizer(self):
+
+
         atom_matrix = np.array([
             [0, 1.0, 2.0, 3.0], # H
             [2, 2.0, 1.0, 4.0], # N
@@ -194,23 +190,33 @@ class TestFeaturizer(unittest.TestCase):
         y = atom_matrix[:, 2]
         z = atom_matrix[:, 3]
 
-        scatter_idxs, gather_idxs, atom_counts = sort_lib.ani_sort(atom_types)
+        ph_atom_types = tf.placeholder(dtype=np.int32)
+        ph_xs = tf.placeholder(dtype=np.float32)
+        ph_ys = tf.placeholder(dtype=np.float32)
+        ph_zs = tf.placeholder(dtype=np.float32)
+        ph_mol_idxs = tf.placeholder(dtype=np.int32)
 
-        mol_atom_counts = tf.segment_sum(tf.ones_like(mol_idxs), mol_idxs)
+        scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(ph_atom_types)
+
+        mol_atom_counts = tf.segment_sum(tf.ones_like(ph_mol_idxs), ph_mol_idxs)
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
-
-        obtained_si, obtained_gi, obtained_ac = self.sess.run([scatter_idxs, gather_idxs, atom_counts])
+        obtained_si, obtained_gi, obtained_ac = self.sess.run(
+            [scatter_idxs, gather_idxs, atom_counts],
+            feed_dict={
+                ph_mol_idxs: mol_idxs,
+                ph_atom_types: atom_types,
+            })
 
         np.testing.assert_array_equal(obtained_ac, [6,2,3,0])
         np.testing.assert_array_equal(obtained_si, [0,0,1,0,1,2,3,4,5,1,2])
         np.testing.assert_array_equal(obtained_gi, [0,8,1,6,9,2,3,4,5,7,10])
 
-        f0, f1, f2, f3 = ani_mod.ani(
-            x,
-            y,
-            z,
-            atom_types,
+        f0, f1, f2, f3 = ani_mod.featurize(
+            ph_xs,
+            ph_ys,
+            ph_zs,
+            ph_atom_types,
             mol_offsets,
             mol_atom_counts,
             scatter_idxs,
@@ -220,14 +226,17 @@ class TestFeaturizer(unittest.TestCase):
         f0, f1, f2, f3 = tf.reshape(f0, (-1, 384)), tf.reshape(f1, (-1, 384)), tf.reshape(f2, (-1, 384)), tf.reshape(f3, (-1, 384))
         scattered_features = tf.concat([f0, f1, f2, f3], axis=0)
         features = tf.gather(scattered_features, gather_idxs)
-
-        obtained_features = self.sess.run(features)
-        # feats = self.sess.run(scattered_features)
+            
+        obtained_features = self.sess.run(features, feed_dict={
+            ph_xs: x,
+            ph_ys: y,
+            ph_zs: z,
+            ph_mol_idxs: mol_idxs,
+            ph_atom_types: atom_types
+        })
 
         expected_features_mol1 = self.reference_feats(atom_matrix[:8, :])
         expected_features_mol2 = self.reference_feats(atom_matrix[8:, :])
-
-
 
         # radial components
         np.testing.assert_almost_equal(obtained_features[:8, :64], expected_features_mol1[:, :64], decimal=6)

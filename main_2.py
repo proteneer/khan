@@ -7,13 +7,14 @@ from tensorflow.python.client import device_lib
 
 import sklearn.model_selection
 
-from khan.training.trainer import Trainer, flatten_results
-from khan.training.trainer_multi_gpu import TrainerMultiGPU, flatten_results
 from khan.data.dataset import RawDataset
+from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
+
+import multiprocessing
 
 import argparse
 
@@ -35,9 +36,12 @@ def main():
 
         parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted energy corrections")
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
-        parser.add_argument('--gpus', default=4, help="Number of gpus to use")
+        parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
+        parser.add_argument('--cpus', default='1', help="Number of CPUs to use (GPUs override this if > 0)")
         parser.add_argument('--batch_size', default='256', help="How many training points to consider before calculating each gradient")
-        parser.add_argument('--max_local_epoch_count', default='30', help="How many epochs to try each learning rate before reducing it")
+        parser.add_argument('--max_local_epoch_count', default='10', help="How many epochs to try each learning rate before reducing it")
+        parser.add_argument('--dataset_index', default='0', help="Index of training set to use")
+        parser.add_argument('--testset_index', default='0', help="Index of test set to use")
 
         parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
         parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
@@ -69,7 +73,8 @@ def main():
 
         print("------------Load evaluation data--------------")
         
-        pickle_file = "eval_data_xy.pickle"
+        pickle_files = ['eval_data_graphdb.pickle', 'eval_data_old_fftest.pickle']
+        pickle_file = pickle_files[ int(args.testset_index) ]
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x = pickle.load( open(pickle_file, "rb") )
@@ -93,8 +98,20 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        trainer = TrainerMultiGPU(sess, n_gpus=int(args.gpus))
         max_local_epoch_count = int(args.max_local_epoch_count)
+        n_gpus = min( int(args.gpus), len(avail_gpus) )
+        n_cpus = min( int(args.cpus), multiprocessing.cpu_count() )
+        if n_gpus > 0:
+            towers = ["/gpu:"+str(i) for i in range(n_gpus)]
+        else:
+            towers = ["/cpu:"+str(i) for i in range(n_cpus)]
+
+        print("towers:", towers)
+
+        trainer = TrainerMultiTower(
+            sess,
+            towers=towers,
+            layer_sizes=(128, 128, 64, 1))
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
@@ -119,7 +136,7 @@ def main():
         print("------------Load training data--------------")
         
         pickle_files = ["gdb8_fftrain_fftest_xy.pickle", "gdb8_graphdb_xy.pickle", "gdb8_xy.pickle", "gdb7_xy.pickle"]
-        pickle_file = pickle_files[0]
+        pickle_file = pickle_files[ int(args.dataset_index) ]
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             Xs, ys = pickle.load( open(pickle_file, "rb") )
