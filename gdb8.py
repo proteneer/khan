@@ -81,7 +81,8 @@ def main():
             trainer.learning_rate,
             trainer.local_epoch_count,
             trainer.unordered_l2s,
-            trainer.train_op
+            trainer.train_op,
+            trainer.debug_charge_models[0].atom_outputs
         ]
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
@@ -94,7 +95,7 @@ def main():
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                sess.run(trainer.max_norm_ops) # should this run after every batch instead?
+                # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
 
                 start_time = time.time()
                 train_results = trainer.feed_dataset(
@@ -102,6 +103,9 @@ def main():
                     shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size)
+                charges = train_results[0][-1]
+
+                print("charges", np.mean(charges), np.max(charges), np.min(charges), np.std(charges))
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time
