@@ -19,12 +19,13 @@ def _ani_charge_grad(op, grads):
     """The gradients for `ani_charge`.
 
     Args:
-    op: The `ani_charge` `Operation` that we are differentiating, which we can use
-      to find the inputs and outputs of the original op.
-    grad: Gradient with respect to the output of the `ani_charge` op.
+
+        op: The `ani_charge` `Operation` that we are differentiating, which we can use
+          to find the inputs and outputs of the original op.
+        grad: Gradient with respect to the output of the `ani_charge` op.
 
     Returns:
-    Gradients with respect to the input of `ani_charge`.
+        Gradients with respect to the input of `ani_charge`.
     """
 
     x,y,z,qs,mo,macs = op.inputs
@@ -89,7 +90,8 @@ class TrainerMultiTower():
     def __init__(self,
         sess,
         towers,
-        layer_sizes=(128, 128, 64, 1)
+        layer_sizes=(128, 128, 64, 1),
+        fit_charges=False,
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -165,8 +167,6 @@ class TrainerMultiTower():
             self.all_models = []
             self.tower_exp_loss = []
 
-            self.debug_charge_models = []
-
             with tf.variable_scope(tf.get_variable_scope()):
                 # for gpu_idx in range(self.num_gpus):
                 for tower_idx, tower_device in enumerate(towers):
@@ -211,30 +211,28 @@ class TrainerMultiTower():
                             self.all_models.append(tower_model_near)
                             tower_near_energy = tf.reshape(tf.segment_sum(tower_model_near.atom_outputs, m_deq), (-1,))
 
-                            tower_model_charges = MoleculeNN(
-                                type_map=["H", "C", "N", "O"],
-                                atom_type_features=[f0, f1, f2, f3],
-                                gather_idxs=gather_idxs,
-                                layer_sizes=(feat_size,) + layer_sizes,
-                                prefix="charge_")
+                            if fit_charges:
+                                tower_model_charges = MoleculeNN(
+                                    type_map=["H", "C", "N", "O"],
+                                    atom_type_features=[f0, f1, f2, f3],
+                                    gather_idxs=gather_idxs,
+                                    layer_sizes=(feat_size,) + layer_sizes,
+                                    prefix="charge_")
 
-                            self.debug_charge_models.append(tower_model_charges)
+                                self.all_models.append(tower_model_charges)
+                                tower_charges = tower_model_charges.atom_outputs
+                                tower_far_energy = ani_mod.ani_charge(
+                                    x_deq,
+                                    y_deq,
+                                    z_deq,
+                                    tower_charges,
+                                    mol_offsets,
+                                    mol_atom_counts
+                                )
+                                tower_pred = tf.add(tower_near_energy, tower_far_energy)
+                            else:
+                                tower_pred = tower_near_energy
 
-                            self.all_models.append(tower_model_charges)
-
-                            tower_charges = tower_model_charges.atom_outputs
-
-                            tower_far_energy = ani_mod.ani_charge(
-                                x_deq,
-                                y_deq,
-                                z_deq,
-                                tower_charges,
-                                mol_offsets,
-                                mol_atom_counts
-                            )
-
-                            tower_pred = tf.add(tower_near_energy, tower_far_energy)
-                            # tower_pred = tower_far_energy
                             self.tower_preds.append(tower_pred)
                             tower_l2 = tf.squared_difference(tower_pred, labels)
                             self.tower_l2s.append(tower_l2)

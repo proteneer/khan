@@ -66,7 +66,9 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=(128, 128, 64, 1))
+            layer_sizes=(128, 128, 64, 1),
+            fit_charges=True
+        )
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
@@ -82,36 +84,7 @@ def main():
             trainer.local_epoch_count,
             trainer.unordered_l2s,
             trainer.train_op,
-            trainer.debug_charge_models[0].atom_outputs
         ]
-
-        #DEBUG FOR JAMES
-        # all_mol_xs = []
-        # all_mol_idxs = []
-        # for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(rd_train.iterate(batch_size=batch_size, shuffle=False)):
-        #     all_mol_xs.append(mol_xs)
-        #     all_mol_idxs.append(mol_idxs)
-
-        # train_results = trainer.feed_dataset(
-        #     rd_train,
-        #     shuffle=False,
-        #     target_ops=trainer.debug_charge_models[0].atom_outputs,
-        #     batch_size=batch_size)
-
-        # all_charges = []
-        # for r in train_results:
-        #     all_charges.append(r)
-
-        # all_mol_xs = np.concatenate(all_mol_xs)
-        # all_mol_idxs = np.expand_dims(np.concatenate(all_mol_idxs), -1)
-        # all_mol_chgs = np.concatenate(all_charges)
-
-        # print(all_mol_xs.shape, all_mol_idxs.shape, all_mol_chgs.shape)
-
-        # np.savez("james_charges_gdb6_train", xyzs=all_mol_xs, idxs=all_mol_idxs, chgs=all_mol_chgs)
-
-        # assert 0
-        # debug for james
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
@@ -131,9 +104,6 @@ def main():
                     shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size)
-                charges = train_results[0][-1]
-
-                print("charges", np.mean(charges), np.max(charges), np.min(charges), np.std(charges))
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time
