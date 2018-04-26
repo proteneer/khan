@@ -85,6 +85,34 @@ def main():
             trainer.debug_charge_models[0].atom_outputs
         ]
 
+        #DEBUG FOR JAMES
+        # all_mol_xs = []
+        # all_mol_idxs = []
+        # for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(rd_train.iterate(batch_size=batch_size, shuffle=False)):
+        #     all_mol_xs.append(mol_xs)
+        #     all_mol_idxs.append(mol_idxs)
+
+        # train_results = trainer.feed_dataset(
+        #     rd_train,
+        #     shuffle=False,
+        #     target_ops=trainer.debug_charge_models[0].atom_outputs,
+        #     batch_size=batch_size)
+
+        # all_charges = []
+        # for r in train_results:
+        #     all_charges.append(r)
+
+        # all_mol_xs = np.concatenate(all_mol_xs)
+        # all_mol_idxs = np.expand_dims(np.concatenate(all_mol_idxs), -1)
+        # all_mol_chgs = np.concatenate(all_charges)
+
+        # print(all_mol_xs.shape, all_mol_idxs.shape, all_mol_chgs.shape)
+
+        # np.savez("james_charges_gdb6_train", xyzs=all_mol_xs, idxs=all_mol_idxs, chgs=all_mol_chgs)
+
+        # assert 0
+        # debug for james
+
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         print("------------Starting Training--------------")

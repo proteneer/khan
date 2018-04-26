@@ -260,13 +260,10 @@ class TrainerMultiTower():
                 self.save_best_params_ops.append(tf.assign(var_copy, var))
                 self.load_best_params_ops.append(tf.assign(var, var_copy))
 
-            # apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.tower_grads), global_step=self.global_step)
-            # variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
-            # variables_averages_op = variable_averages.apply(tf.trainable_variables())
-            # self.train_op = tf.group(apply_gradient_op, variables_averages_op)
-
-            self.train_op = self.optimizer.minimize(self.tower_exp_loss[0])
-
+            apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.tower_grads), global_step=self.global_step)
+            variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
+            variables_averages_op = variable_averages.apply(tf.trainable_variables())
+            self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
         ws = self._weight_matrices()
         max_norm_ops = []

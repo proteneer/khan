@@ -137,6 +137,7 @@ REGISTER_OP("AniChargeGrad")
     return Status::OK();
   });
 
+
 float charge_grads(const float *xs,  const float *ys, const float *zs, const float *qs, size_t num_atoms, float *q_grads, float grad) {
   for(size_t i=0; i < num_atoms; i++) {
     float q_grad = 0;
