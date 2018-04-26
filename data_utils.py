@@ -232,6 +232,7 @@ def load_hdf5_files(
     num_samples = 0
 
     for hdf5file in hdf5files:
+        print("Processing", hdf5file)
         adl = pya.anidataloader(hdf5file)
         for data in adl:
 
@@ -242,7 +243,7 @@ def load_hdf5_files(
             S = data['species']
             smi = data['smiles']
 
-            print("Processing: ", P)
+            # print("Processing: ", P)
 
             path = P.split("/")[-1]
 

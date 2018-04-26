@@ -66,7 +66,9 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=(128, 128, 64, 1))
+            layer_sizes=(128, 128, 64, 1),
+            fit_charges=True
+        )
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
@@ -81,7 +83,7 @@ def main():
             trainer.learning_rate,
             trainer.local_epoch_count,
             trainer.unordered_l2s,
-            trainer.train_op
+            trainer.train_op,
         ]
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
@@ -94,7 +96,7 @@ def main():
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                sess.run(trainer.max_norm_ops) # should this run after every batch instead?
+                # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
 
                 start_time = time.time()
                 train_results = trainer.feed_dataset(
