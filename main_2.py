@@ -38,13 +38,13 @@ def main():
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
         parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
         parser.add_argument('--cpus', default='1', help="Number of CPUs to use (GPUs override this if > 0)")
-        parser.add_argument('--batch_size', default='256', help="How many training points to consider before calculating each gradient")
+        parser.add_argument('--start_batch_size', default='256', help="How many training points to consider before calculating each gradient")
         parser.add_argument('--max_local_epoch_count', default='10', help="How many epochs to try each learning rate before reducing it")
         parser.add_argument('--dataset_index', default='0', help="Index of training set to use")
         parser.add_argument('--testset_index', default='0', help="Index of test set to use")
 
         parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
-        parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
+        parser.add_argument('--train-dir', default='/home/yzhao/ANI-1_release', help="location where work data is dumped")
         parser.add_argument('--restart', default=False, action='store_true', help="Whether to restart from the save dir")
 
         args = parser.parse_args()
@@ -66,7 +66,7 @@ def main():
         if os.path.isdir(save_dir) and not args.restart:
             print('save_dir', save_dir, 'exists and this is not a restart job')
             exit()
-        batch_size = int(args.batch_size)
+        batch_size = int(args.start_batch_size)
         use_fitted = args.fitted
         add_ffdata = args.add_ffdata
         data_loader = DataLoader(use_fitted)
@@ -108,23 +108,55 @@ def main():
 
         print("towers:", towers)
 
+        #layer_sizes=(128, 128, 64, 1), # original
+        #layer_sizes=(128, 128, 64, 8, 1)
+        #layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
+        layer_sizes=(64, 64, 64, 64, 8, 1)
+        print('layer_sizes:', layer_sizes)
+        n_weights = sum( [layer_sizes[i]*layer_sizes[i+1] for i in range(len(layer_sizes)-1)] )
+        print('n_weights:', n_weights)
+
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=(128, 128, 64, 1))
+            layer_sizes=layer_sizes,
+            so_file='gpu_featurizer/ani_num32_0.12.so')
+
+        print("------------Load training data--------------")
+        
+        pickle_files = ["gdb8_fftrain_fftest_xy.pickle", "gdb8_graphdb_xy.pickle", "gdb8_xy.pickle", "gdb7_xy.pickle", "gdb6_ffdata_xy.pickle", "gdb3_xy.pickle"]
+        pickle_file = pickle_files[ int(args.dataset_index) ]
+        if os.path.isfile(pickle_file):
+            print('Loading pickle from', pickle_file)
+            Xs, ys = pickle.load( open(pickle_file, "rb") )
+        else:
+            if add_ffdata: # FOR TESTING ONLY
+                ff_train_dir = ROTAMER_TRAIN_DIR
+            else:
+                ff_train_dir = None
+            Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+            print('Pickling data...')
+            pickle.dump( (Xs, ys), open( pickle_file, "wb" ) )
+
+        print("------------Initializing model--------------")
+
+        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.1) # stratify by UTT would be good to try here
+        rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+        print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
             trainer.load(save_dir)
             trainer.load_best_params()
-            # TODo: allow changing learning rate here
-            #trainer.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False) # if restart should have different learning rate
         else: # initialize new random weights. If weights give crazy energies that might break convergence, just try again. 
-            acceptable_start_rmse = 200.0
-            for attempt_count in range(100):
+            acceptable_start_rmse = 500.0
+            for attempt_count in range(1):
                 trainer.initialize() # initialize to random variables
-                test_err = trainer.eval_abs_rmse(rd_ffneutral_mo62x)
+                test_err = trainer.eval_abs_rmse(rd_test)
                 print('Initial error from random weights: %.1f kcal/mol, acceptable limit: %.1f' % (test_err, acceptable_start_rmse) )
+                for wm in trainer._weight_matrices():
+                    data = sess.run(wm)
+                    print( wm.name, 'max', np.max(data), 'min', np.min(data) )
                 if test_err < acceptable_start_rmse:
                     break
 
@@ -133,21 +165,6 @@ def main():
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
             print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
         
-        print("------------Load training data--------------")
-        
-        pickle_files = ["gdb8_fftrain_fftest_xy.pickle", "gdb8_graphdb_xy.pickle", "gdb8_xy.pickle", "gdb7_xy.pickle"]
-        pickle_file = pickle_files[ int(args.dataset_index) ]
-        if os.path.isfile(pickle_file):
-            print('Loading pickle from', pickle_file)
-            Xs, ys = pickle.load( open(pickle_file, "rb") )
-        else:
-            if add_ffdata:
-                ff_train_dir = ROTAMER_TRAIN_DIR
-            else:
-                ff_train_dir = None
-            Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
-            print('Pickling data...')
-            pickle.dump( (Xs, ys), open( pickle_file, "wb" ) )
 
         print("------------Starting Training--------------")
 
@@ -159,15 +176,8 @@ def main():
             trainer.train_op
         ]
         start_time = time.time()
-        best_test_score = None
-        while sess.run(trainer.learning_rate) > 1e-9:
-            if best_test_score is None: # start testing
-                # generate new train and validation split at every training round?
-                X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.2) # stratify by UTT would be good to try here
-                rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
-                print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
-                best_test_score = trainer.eval_abs_rmse(rd_test)
-
+        best_test_score = trainer.eval_abs_rmse(rd_test)
+        while sess.run(trainer.learning_rate) > 1e-7:
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
                 for step in range(1): # how many rounds to perform before checking test rmse
                     train_step_time = time.time()
@@ -176,7 +186,6 @@ def main():
                         shuffle=True,
                         target_ops=train_ops, # note: evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time
                         batch_size=batch_size)
-                    sess.run(trainer.max_norm_ops) # regularization by imposing maximum norm of weights. Should this run after every batch instead? 
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     #print('train_abs_rmse: %f, %.2fs' % (train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]
@@ -184,7 +193,7 @@ def main():
                 local_epoch_count = train_results[0][2]
                 test_abs_rmse_time = time.time()
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-                print('test_abs_rmse_time', time.time()-test_abs_rmse_time )
+                #print('test_abs_rmse_time', time.time()-test_abs_rmse_time )
                 time_per_epoch = time.time() - start_time
                 start_time = time.time()
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
@@ -210,6 +219,7 @@ def main():
             print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
+            batch_size = min(batch_size*2, 65536) # bigger batches as fitting goes on, cap at 2^16
             trainer.load_best_params()
 
     return

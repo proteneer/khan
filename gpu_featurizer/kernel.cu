@@ -178,17 +178,17 @@ __global__ void featurize(
                 auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
                 auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
             
-                if(isnan(res1) || isinf(res1)) {
-                    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
+                //if(isnan(res1) || isinf(res1)) {
+                //    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
                     // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
                         // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                }
+                //}
 
-                if(isnan(res2) || isinf(res2)) {
-                    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
+                //if(isnan(res2) || isinf(res2)) {
+                //    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
                     // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
                         // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                }
+                //}
 
             }
         }

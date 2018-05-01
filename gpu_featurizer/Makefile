@@ -11,18 +11,18 @@ CC_LINK_FLAGS=$(TF_LFLAGS)
 all: ani
 
 ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o
-	$(CC) -shared -o my_new_ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+	$(CC) -shared -o ani_num32_0.12.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
-functor_op_gpu.o: functor_op_gpu.cu
+functor_op_gpu.o: functor_op_gpu.cu parameters.h
 	$(NVCC) functor_op_gpu.cu -c $(NVCC_FLAGS)
 
-kernel.o: kernel.cu
+kernel.o: kernel.cu parameters.h
 	$(NVCC) kernel.cu -c $(NVCC_FLAGS)
 
-kernel_cpu.o: kernel_cpu.cpp
+kernel_cpu.o: kernel_cpu.cpp parameters.h
 	$(CC) kernel_cpu.cpp -c $(CC_FLAGS)
 
-functor_op_cpu.o: functor_op_cpu.cpp
+functor_op_cpu.o: functor_op_cpu.cpp parameters.h
 	$(CC) functor_op_cpu.cpp -c $(CC_FLAGS)
 
 ani_op.o: ani_op.cpp
@@ -32,4 +32,5 @@ ani_sort.o: ani_sort.cpp
 	$(CC) ani_sort.cpp -c $(CC_FLAGS)
 
 clean:
-	rm -f *.o *.so
+	rm -f *.o
+

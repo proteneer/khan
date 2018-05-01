@@ -5,8 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 
-ani_mod = tf.load_op_library('gpu_featurizer/ani.so')
-
 import khan
 from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
@@ -61,7 +59,8 @@ class TrainerMultiTower():
     def __init__(self,
         sess,
         towers,
-        layer_sizes=(128, 128, 64, 1)
+        layer_sizes=(128, 128, 64, 1),
+        so_file='gpu_featurizer/ani.so'
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -71,12 +70,8 @@ class TrainerMultiTower():
         ----------
         sess: tf.Session
             A tensorflow session under which we use
-
-        n_gpus: int (optional)
-            Number of gpus to train the model on. This must be > 0 for now.
-
         """
-
+        self.ani_mod = tf.load_op_library(so_file)
         self.towers = towers
         self.num_towers = len(towers)
 
@@ -149,10 +144,10 @@ class TrainerMultiTower():
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
-                                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
+                                scatter_idxs, gather_idxs, atom_counts = self.ani_mod.ani_sort(a_deq)
 
                             with tf.device(tower_device):
-                                f0, f1, f2, f3 = ani_mod.featurize(
+                                f0, f1, f2, f3 = self.ani_mod.featurize(
                                     x_deq,
                                     y_deq,
                                     z_deq,
@@ -182,7 +177,10 @@ class TrainerMultiTower():
 
                             tower_pred = tower_model.predict_op()
                             self.tower_preds.append(tower_pred)
+                            #high_E = 20.0 / HARTREE_TO_KCAL_PER_MOL
+                            #error_weighting = tf.rsqrt( tf.maximum(labels-high_E, 1.0) ) # ASSUMES LABELS ARE CENTERED AROUND ZERO AND RELATED TO STABILITY
                             tower_l2 = tf.squared_difference(tower_pred, labels)
+                            #tower_l2 = tf.multiply(tower_l2, error_weighting)
                             self.tower_l2s.append(tower_l2)
 
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
@@ -190,7 +188,11 @@ class TrainerMultiTower():
 
                             tf.get_variable_scope().reuse_variables()
                             self.tower_exp_loss.append(tower_exp_loss)
-                            tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
+                            tower_grad = self.optimizer.compute_gradients(
+                                tower_exp_loss,
+                                #var_list=tf.trainable_variables()[tower_idx:tower_idx+1], # could set this to a per-tower list for performance?
+                                gate_gradients=self.optimizer.GATE_NONE, # risky, allows computation of gradients to be asynchronous with use. Safer way is GATE_OP. 
+                                colocate_gradients_with_ops=True) # tries putting gradient on same GPU as its op
                             self.tower_grads.append(tower_grad)
 
             self.best_params = []
@@ -212,12 +214,9 @@ class TrainerMultiTower():
             self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
         ws = self._weight_matrices()
-        max_norm_ops = []
 
-        for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 5.0, axes=1)))
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
-        self.max_norm_ops = max_norm_ops
+        #self.unordered_l2s += l2_norm_k * tf.norm(ws) # one way to enforce an l2 norm
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -287,9 +286,6 @@ class TrainerMultiTower():
             for b in ann.bs:
                 biases.append(b)
         return biases
-
-    def get_maxnorm_ops(self):
-        return self.max_norm_ops
 
     def get_train_op_rmse(self):
         return self.train_op_rmse
