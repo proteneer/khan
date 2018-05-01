@@ -11,15 +11,8 @@ from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import multiprocessing
-
 import argparse
 
-
-def flatten_results(res, pos=0):
-    flattened = []
-    for l in res:
-        flattened.append(l[pos])
-    return np.concatenate(flattened).reshape((-1,))
 
 def main():
 
