@@ -1,10 +1,7 @@
 import numpy as np
 import os
 
-import sklearn.model_selection
-
 import time
-from khan.data.dataset import RawDataset
 import data_utils
 
 def load_calibration_file(calibration_file):
@@ -35,17 +32,17 @@ class DataLoader():
     def load_gdb8(self,
         data_dir,
         calibration_file=None,
-        ff_train_dir=None):
+        ff_train_dirs=None):
 
         gdb_files = [
             os.path.join(data_dir, "ani_gdb_s01.h5"),
             os.path.join(data_dir, "ani_gdb_s02.h5"),
             os.path.join(data_dir, "ani_gdb_s03.h5"),
-            os.path.join(data_dir, "ani_gdb_s04.h5"),
-            os.path.join(data_dir, "ani_gdb_s05.h5"),
-            os.path.join(data_dir, "ani_gdb_s06.h5"),
-            os.path.join(data_dir, "ani_gdb_s07.h5"),
-            os.path.join(data_dir, "ani_gdb_s08.h5"),
+            #os.path.join(data_dir, "ani_gdb_s04.h5"),
+            #os.path.join(data_dir, "ani_gdb_s05.h5"),
+            #os.path.join(data_dir, "ani_gdb_s06.h5"),
+            #os.path.join(data_dir, "ani_gdb_s07.h5"),
+            #os.path.join(data_dir, "ani_gdb_s08.h5"),
         ]
 
         if calibration_file:
@@ -58,14 +55,14 @@ class DataLoader():
             calibration_map=cal_map,
             use_fitted=self.use_fitted)
 
-        if ff_train_dir is not None:
-            ff_train_Xs, ff_train_ys, _ = data_utils.load_ff_files(ff_train_dir, use_fitted=self.use_fitted)
-            Xs.extend(ff_train_Xs)
-            ys.extend(ff_train_ys)
+        if ff_train_dirs:
+            for train_dir in ff_train_dirs:
+                ff_train_Xs, ff_train_ys, _ = data_utils.load_ff_files(train_dir, use_fitted=self.use_fitted)
+                Xs.extend(ff_train_Xs)
+                ys.extend(ff_train_ys)
 
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.25, random_state=0)
+        return Xs, ys
 
-        return RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
     def load_gdb11(self,
         data_dir,
@@ -83,8 +80,9 @@ class DataLoader():
         calibration_map=cal_map,
         use_fitted=self.use_fitted)
 
-        return RawDataset(X_gdb11, y_gdb11)
+        return X_gdb11, y_gdb11
 
     def load_ff(self, data_dir):
         ff_test_Xs, ff_test_ys, ff_groups = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
-        return RawDataset(ff_test_Xs, ff_test_ys), ff_groups
+
+        return ff_test_Xs, ff_test_ys, ff_groups

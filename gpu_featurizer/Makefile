@@ -35,4 +35,5 @@ ani_charges.o: ani_charges.cpp parameters.h
 	$(CC) ani_charges.cpp -c $(CC_FLAGS)
 
 clean:
-	rm -f *.o *.so
+	rm -f *.o
+

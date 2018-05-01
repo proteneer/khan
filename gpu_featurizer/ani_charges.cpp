@@ -212,9 +212,11 @@ class AniChargeGrad : public OpKernel {
 };
 
 
+
 REGISTER_KERNEL_BUILDER(
   Name("AniCharge").Device(DEVICE_CPU), AniCharge
 );
+
 
 REGISTER_KERNEL_BUILDER(
   Name("AniChargeGrad").Device(DEVICE_CPU), AniChargeGrad
