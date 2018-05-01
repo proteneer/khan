@@ -34,6 +34,7 @@ def main():
 
         parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
+        parser.add_argument('--ani_lib', required=True, help="Location of the shared object for GPU featurization")
         parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted energy corrections")
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
         parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
@@ -50,6 +51,11 @@ def main():
         args = parser.parse_args()
 
         print("Arguments", args)
+
+        lib_path = os.path.abspath(args.ani_lib)
+        print("Loading custom kernel from", lib_path)
+        initialize_module(lib_path)
+
 
         ANI_TRAIN_DIR = args.train_dir
         ANI_WORK_DIR = args.work_dir
@@ -119,8 +125,7 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=layer_sizes,
-            so_file='gpu_featurizer/ani_num32_0.12.so')
+            layer_sizes=layer_sizes)
 
         print("------------Load training data--------------")
         
@@ -185,7 +190,8 @@ def main():
                         rd_train,
                         shuffle=True,
                         target_ops=train_ops, # note: evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time
-                        batch_size=batch_size)
+                        batch_size=batch_size,
+                        before_hooks=trainer.max_norm_ops)
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     #print('train_abs_rmse: %f, %.2fs' % (train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]

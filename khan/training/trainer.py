@@ -15,12 +15,6 @@ from khan.model.nn import MoleculeNN, mnn_staging
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 
-def flatten_results(res, pos=0):
-    flattened = []
-    for l in res:
-        flattened.append(l[pos])
-    return np.concatenate(flattened).reshape((-1,))
-
 # import time
 # import numpy as np
 # import tensorflow as tf

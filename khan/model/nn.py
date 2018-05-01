@@ -52,12 +52,9 @@ class AtomNN():
                     prefix+"b"+name,
                     (y),
                     np.float32,
-                    #tf.zeros_initializer,
-                    tf.random_normal_initializer(stddev=0.01),
+                    tf.zeros_initializer,
                     trainable=True
                 )
-            #if idx != len(layer_sizes) - 1:
-            W = tf.clip_by_norm(W, 1.0, axes=1)
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
                 A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
