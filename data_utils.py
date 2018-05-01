@@ -241,6 +241,7 @@ def load_hdf5_files(
     num_samples = 0
 
     for hdf5file in hdf5files:
+        print("Processing", hdf5file)
         adl = pya.anidataloader(hdf5file)
         for data in adl:
 
@@ -250,8 +251,6 @@ def load_hdf5_files(
             E = data['energies']
             S = data['species']
             smi = data['smiles']
-            
-            #print("Processing: ", P)
 
             path = P.split("/")[-1]
 
@@ -311,6 +310,5 @@ def load_hdf5_files(
                     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                     Xs.append(X)
 
-
-
     return Xs, ys
+

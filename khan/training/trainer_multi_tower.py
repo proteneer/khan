@@ -1,15 +1,45 @@
 import glob
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.framework import ops
 
 import khan
 from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
-
 from data_utils import HARTREE_TO_KCAL_PER_MOL
+
+ani_mod = tf.load_op_library('gpu_featurizer/ani.so');
+
+@ops.RegisterGradient("AniCharge")
+def _ani_charge_grad(op, grads):
+    """The gradients for `ani_charge`.
+
+    Args:
+
+        op: The `ani_charge` `Operation` that we are differentiating, which we can use
+          to find the inputs and outputs of the original op.
+        grad: Gradient with respect to the output of the `ani_charge` op.
+
+    Returns:
+        Gradients with respect to the input of `ani_charge`.
+    """
+
+    x,y,z,qs,mo,macs = op.inputs
+    dydx = ani_mod.ani_charge_grad(x,y,z,qs,mo,macs,grads)
+    result = [
+        None,
+        None,
+        None,
+        dydx,
+        None,
+        None,
+    ]
+    return result
+
 
 
 def flatten_results(res, pos=0):
@@ -29,6 +59,7 @@ def average_gradients(tower_grads):
     Returns:
         List of pairs of (gradient, variable) where the gradient has been averaged
         across all towers.
+
     """
     average_grads = []
     for grad_and_vars in zip(*tower_grads):
@@ -59,8 +90,9 @@ class TrainerMultiTower():
     def __init__(self,
         sess,
         towers,
-        layer_sizes=(128, 128, 64, 1),
-        so_file='gpu_featurizer/ani.so'
+        layer_sizes=(128, 128, 64, 8, 1),
+        so_file='gpu_featurizer/ani.so',
+        fit_charges=False
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -166,16 +198,38 @@ class TrainerMultiTower():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            tower_model = MoleculeNN(
+                            tower_model_near = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
-                                mol_idxs=m_deq,
-                                layer_sizes=(feat_size,) + layer_sizes)
+                                layer_sizes=(feat_size,) + layer_sizes,
+                                prefix="near_")
 
-                            self.all_models.append(tower_model)
+                            self.all_models.append(tower_model_near)
+                            tower_near_energy = tf.reshape(tf.segment_sum(tower_model_near.atom_outputs, m_deq), (-1,))
 
-                            tower_pred = tower_model.predict_op()
+                            if fit_charges:
+                                tower_model_charges = MoleculeNN(
+                                    type_map=["H", "C", "N", "O"],
+                                    atom_type_features=[f0, f1, f2, f3],
+                                    gather_idxs=gather_idxs,
+                                    layer_sizes=(feat_size,) + layer_sizes,
+                                    prefix="charge_")
+
+                                self.all_models.append(tower_model_charges)
+                                tower_charges = tower_model_charges.atom_outputs
+                                tower_far_energy = ani_mod.ani_charge(
+                                    x_deq,
+                                    y_deq,
+                                    z_deq,
+                                    tower_charges,
+                                    mol_offsets,
+                                    mol_atom_counts
+                                )
+                                tower_pred = tf.add(tower_near_energy, tower_far_energy)
+                            else:
+                                tower_pred = tower_near_energy
+
                             self.tower_preds.append(tower_pred)
                             #high_E = 20.0 / HARTREE_TO_KCAL_PER_MOL
                             #error_weighting = tf.rsqrt( tf.maximum(labels-high_E, 1.0) ) # ASSUMES LABELS ARE CENTERED AROUND ZERO AND RELATED TO STABILITY

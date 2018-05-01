@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, atom_type=""):
+    def __init__(self, features, layer_sizes, atom_type="", prefix=""):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -39,15 +39,17 @@ class AtomNN():
 
             with tf.device('/cpu:0'):
                 W = tf.get_variable(
-                    "W"+name,
+                    prefix+"W"+name,
                     (x, y),
                     np.float32,
                     #tf.random_uniform_initializer(minval=-0.1, maxval=0.1),
-                    tf.random_normal_initializer(stddev=0.1),
+                    #tf.random_normal_initializer(stddev=0.1),
+                    # tf.random_normal_initializer(mean=0, stddev=1.0/x),
+                    tf.random_normal_initializer(mean=0, stddev=0.1),
                     trainable=True
                 )
                 b = tf.get_variable(
-                    "b"+name,
+                    prefix+"b"+name,
                     (y),
                     np.float32,
                     #tf.zeros_initializer,
@@ -61,8 +63,6 @@ class AtomNN():
                 A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
                 #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
                 #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
-                #A = tf.nn.relu(A)
-		# A = tf.exp(-1*tf.pow(A, 2)) # Gaussian activation
 
             self.Ws.append(W)
             self.bs.append(b)
@@ -129,8 +129,8 @@ class MoleculeNN():
         type_map,
         atom_type_features,
         gather_idxs,
-        mol_idxs,
-        layer_sizes):
+        layer_sizes,
+        prefix):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
 
@@ -160,13 +160,15 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type)
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type, prefix)
             self.anns.append(ann)
             atom_type_nrgs.append(ann.atom_energies())
 
-        atom_nrgs = tf.concat(atom_type_nrgs, axis=0)
-        self.atom_nrgs = tf.gather(atom_nrgs, gather_idxs)
-        self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
+        self.atom_outputs = tf.gather(tf.concat(atom_type_nrgs, axis=0), gather_idxs)
+        # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
+
+    # def atom_outputs(self):
+        # return self.atom_outputs
 
     def predict_op(self):
         """
