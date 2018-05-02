@@ -1,5 +1,3 @@
-
-
 #ifndef PARAMETERS_H_
 #define PARAMETERS_H_
 
@@ -73,7 +71,7 @@ const int NUM_R_Rs = 32;
 const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
 
 const float R_eta = 16.0;
-const float R_Rc = 4.6;
+const float R_Rc = 3.96;
 
 const float A_Rc = 3.1;
 const float A_eta = 6.0;
@@ -87,38 +85,38 @@ const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
 // portably transfer over to CPU code?
 CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
-    0.13939394,
-    0.27878788,
-    0.41818182,
-    0.55757576,
-    0.6969697,
-    0.83636364,
-    0.97575758,
-    1.11515152,
-    1.25454545,
-    1.39393939,
-    1.53333333,
-    1.67272727,
-    1.81212121,
-    1.95151515,
-    2.09090909,
-    2.23030303,
-    2.36969697,
-    2.50909091,
-    2.64848485,
-    2.78787879,
-    2.92727273,
-    3.06666667,
-    3.20606061,
-    3.34545455,
-    3.48484848,
-    3.62424242,
-    3.76363636,
-    3.9030303,
-    4.04242424,
-    4.18181818,
-    4.32121212,
-    4.46060606
+    0.12,
+    0.24,
+    0.36,
+    0.48,
+    0.6,
+    0.72,
+    0.84,
+    0.96,
+    1.08,
+    1.2,
+    1.32,
+    1.44,
+    1.56,
+    1.68,
+    1.8,
+    1.92,
+    2.04,
+    2.16,
+    2.28,
+    2.4,
+    2.52,
+    2.64,
+    2.76,
+    2.88,
+    3,
+    3.12,
+    3.24,
+    3.36,
+    3.48,
+    3.6,
+    3.72,
+    3.84
 };
 
 CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
@@ -143,5 +141,5 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
     2.75555556
 };
 
-
 #endif
+

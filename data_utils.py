@@ -13,18 +13,26 @@ selfIxnNrgWB97 = np.array([
     -54.5680045287,
     -75.0362229210], dtype=np.float32)
 
+# DFT-calculated self-interaction, not linear fitted
 selfIxnNrgMO62x = np.array([
-   -0.498135,
-   -37.841399,
-   -54.586413,
-   -75.062826,
+  -0.498135,
+  -37.841399,
+  -54.586413,
+  -75.062826,
+], dtype=np.float32)
+
+# linear fitted self-interaction
+selfIxnNrgFitted = np.array([
+    -374.85 / HARTREE_TO_KCAL_PER_MOL, 
+    -23898.1 / HARTREE_TO_KCAL_PER_MOL, 
+    -34337.6 / HARTREE_TO_KCAL_PER_MOL, 
+    -47188.0 / HARTREE_TO_KCAL_PER_MOL 
 ], dtype=np.float32)
 
 # import correction
 # import featurizer
 
 MAX_ATOM_LIMIT = 32
-
 
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
@@ -192,9 +200,6 @@ def load_ff_files(ff_dir, use_fitted=False):
     # print(len(Xs), len(ys))
     return Xs, ys, g_ys
 
-
-import time
-
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
@@ -227,8 +232,6 @@ def load_hdf5_files(
 
     print("Loading...")
 
-    start_time = time.time()
-
     num_samples = 0
 
     for hdf5file in hdf5files:
@@ -243,14 +246,12 @@ def load_hdf5_files(
             S = data['species']
             smi = data['smiles']
 
-            # print("Processing: ", P)
-
             path = P.split("/")[-1]
 
             Z = convert_species_to_atomic_nums(S)
 
             if len(Z) > MAX_ATOM_LIMIT:
-                print("skipipng")
+                print("skippng", P, 'n_atoms too large:', len(Z), '>', MAX_ATOM_LIMIT)
                 continue
 
             minimum_wb97 = np.amin(E)
@@ -303,6 +304,5 @@ def load_hdf5_files(
                     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                     Xs.append(X)
 
-
-
     return Xs, ys
+
