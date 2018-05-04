@@ -251,7 +251,6 @@ __global__ void featurize(
                             // printf("i,j,k,t,s %d %d %d %d %d %d\n", g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, at_idx, ar_idx, linearize(j_type, k_type, at_idx, ar_idx))
                             auto res = atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s), summand);
 
-
                             // if(isnan(res) || isinf(res)) {
                             //     printf("WTF ANGULAR SUMMAND NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
                             //         g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);

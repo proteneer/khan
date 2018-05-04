@@ -3,9 +3,9 @@ NVCC=nvcc
 TF_CFLAGS=-I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
 TF_LFLAGS=-L/home/yutong/venv/lib/python3.5/site-packages/tensorflow -ltensorflow_framework
 
-NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
+NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -g -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
 CC=g++
-CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
+CC_FLAGS=-std=c++11 -g -Ofast -march=native -fPIC $(TF_CFLAGS)
 CC_LINK_FLAGS=$(TF_LFLAGS)
 
 all: ani
