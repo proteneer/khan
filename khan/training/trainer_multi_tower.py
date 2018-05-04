@@ -15,6 +15,35 @@ from data_utils import HARTREE_TO_KCAL_PER_MOL
 
 ani_mod = None
 
+@ops.RegisterGradient("Featurize")
+def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
+    x,y,z,a,mo,macs,sis,acs = op.inputs
+    dx, dy, dz = ani_mod.featurize_grad(
+        x,
+        y,
+        z,
+        a,
+        mo,
+        macs,
+        sis,
+        acs,
+        grad_hs,
+        grad_cs,
+        grad_ns,
+        grad_os
+    )
+
+    return [
+        dx,
+        dy,
+        dz,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
     """The gradients for `ani_charge`.
@@ -167,6 +196,8 @@ class TrainerMultiTower():
             self.tower_preds = []
             self.tower_bids = []
             self.tower_l2s = []
+            self.tower_mos = []
+            self.tower_coord_grads = []
             self.all_models = []
             self.tower_exp_loss = []
 
@@ -184,6 +215,8 @@ class TrainerMultiTower():
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
                                 scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
+
+                                self.tower_mos.append(mol_offsets)
 
                             with tf.device(tower_device):
                                 f0, f1, f2, f3 = ani_mod.featurize(
@@ -249,6 +282,8 @@ class TrainerMultiTower():
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
                             self.tower_grads.append(tower_grad)
 
+                            self.tower_coord_grads.append(tf.gradients(tower_pred, [x_deq, y_deq, z_deq]))
+
             self.best_params = []
             self.save_best_params_ops = []
             self.load_best_params_ops = []
@@ -278,6 +313,7 @@ class TrainerMultiTower():
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
+
 
     def initialize(self):
         """
@@ -357,6 +393,45 @@ class TrainerMultiTower():
     def eval_abs_rmse(self, dataset, batch_size=1024):
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
+
+    def coordinate_gradients(self, dataset, batch_size=1024):
+        """
+        Compute gradients for a dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset from which we predict from.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        list of gradients
+            Returns a list of num_atoms x 3 gradients for each molecule
+
+        """
+        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_coord_grads, self.tower_mos, self.tower_bids], batch_size=batch_size)
+
+        ordered_grads = []
+        ordered_mos = []
+
+        for (grad, mo, ids) in results:
+            idxs =  np.argsort(ids)
+            sorted_grads = np.take(grad, idxs, axis=0)
+            sorted_mos = np.take(mo, idxs, axis=0)
+            ordered_grads.extend(sorted_grads)
+            ordered_mos.extend(sorted_mos)
+
+        all_grads = []
+
+        for batch_g, batch_m in zip(ordered_grads, ordered_mos):
+            # should have 1024 per batch?
+            res = np.split(np.vstack(batch_g).reshape(-1, 3), batch_m)
+            all_grads.extend(res)
+
+        return all_grads
 
     def predict(self, dataset, batch_size=1024):
         """

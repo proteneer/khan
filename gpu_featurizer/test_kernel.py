@@ -9,12 +9,6 @@ from tensorflow.python.framework import ops
 import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
-# sort_lib = tf.load_op_library('ani_sort.so');
-
-
-# from tensorflow.python import debug as tf_debug
-
-
 
 @ops.RegisterGradient("Featurize")
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
@@ -294,94 +288,60 @@ class TestFeaturizer(unittest.TestCase):
 
         with self.sess:
 
-            for ff, count in zip([f0, f1, f2], [6, 2, 3]):
-                error = tf.test.compute_gradient_error(
-                    ph_xs,
-                    x.shape,
-                    ff,
-                    (count, FEATURE_SIZE),
-                    x_init_value=x,
-                    delta=0.01,
-                    extra_feed_dict={
-                        ph_ys: y,
-                        ph_zs: z,
-                        ph_mol_idxs: mol_idxs,
-                        ph_atom_types: atom_types
-                    }
-                )
+            error = tf.test.compute_gradient_error(
+                ph_xs,
+                x.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=x,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
 
-                assert error < 0.003
-
-
-                error = tf.test.compute_gradient_error(
-                    ph_ys,
-                    y.shape,
-                    ff,
-                    (count, FEATURE_SIZE),
-                    x_init_value=y,
-                    delta=0.01,
-                    extra_feed_dict={
-                        ph_xs: x,
-                        ph_zs: z,
-                        ph_mol_idxs: mol_idxs,
-                        ph_atom_types: atom_types
-                    }
-                )
-
-                assert error < 0.003
-
-                error = tf.test.compute_gradient_error(
-                    ph_zs,
-                    z.shape,
-                    ff,
-                    (count, FEATURE_SIZE),
-                    x_init_value=z,
-                    delta=0.01,
-                    extra_feed_dict={
-                        ph_xs: x,
-                        ph_ys: y,
-                        ph_mol_idxs: mol_idxs,
-                        ph_atom_types: atom_types
-                    }
-                )
-
-                assert error < 0.003
+            assert error < 0.003
 
 
-            # error = tf.test.compute_gradient_error(
-            #     ph_xs,
-            #     x.shape,
-            #     f0,
-            #     (count, FEATURE_SIZE),
-            #     x_init_value=x,
-            #     delta=0.01,
-            #     extra_feed_dict={
-            #         ph_ys: y,
-            #         ph_zs: z,
-            #         ph_mol_idxs: mol_idxs,
-            #         ph_atom_types: atom_types
-            #     }
-            # )
+            error = tf.test.compute_gradient_error(
+                ph_ys,
+                y.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=y,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
 
-            # assert error < 0.001
+            assert error < 0.003
 
-            # error = tf.test.compute_gradient_error(
-            #     ph_xs,
-            #     x.shape,
-            #     f0[:, 0],
-            #     (6,),
-            #     x_init_value=x,
-            #     delta=0.01,
-            #     extra_feed_dict={
-            #         # ph_xs: x,
-            #         ph_ys: y,
-            #         ph_zs: z,
-            #         ph_mol_idxs: mol_idxs,
-            #         ph_atom_types: atom_types
-            #     }
-            # )
+            error = tf.test.compute_gradient_error(
+                ph_zs,
+                z.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=z,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
 
-            # assert error < 0.01
+            assert error < 0.003
+
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,6 +97,10 @@ def main():
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
+        # Uncomment if you'd like gradients for a dataset
+        # for grad in trainer.coordinate_gradients(rd_test):
+        #     print(grad.shape)
+
         print("------------Starting Training--------------")
 
         start_time = time.time()
