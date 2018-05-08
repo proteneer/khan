@@ -22,4 +22,26 @@ struct AniFunctor {
     const int *acs);
 };
 
+template <typename Device>
+struct AniGrad {
+  void operator()(
+    const Device& d,
+    const float *Xs,
+    const float *Ys,
+    const float *Zs,
+    const int *atomic_nums,
+    const int *mol_offsets,
+    const int *mol_atom_count,
+    const int num_mols, // actually equal to blockDim.x
+    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+    const float *input_H_grads,
+    const float *input_C_grads,
+    const float *input_N_grads,
+    const float *input_O_grads,
+    float *X_grads,
+    float *Y_grads,
+    float *Z_grads,
+    const int *acs);
+};
+
 #endif
