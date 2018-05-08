@@ -3,15 +3,34 @@ import os
 import numpy as np
 
 from khan.data import pyanitools as pya
+import json
+from sklearn.model_selection import train_test_split
 
 
 HARTREE_TO_KCAL_PER_MOL = 627.509
+
+# these energies are incorrect, see https://github.com/isayev/ANI1_dataset/issues/2
+# the "correct" energies are 
+
+selfIxnNrgWB97X = np.array([
+    -0.499321232710,
+    -37.8338334397,
+    -54.5732824628,
+    -75.0424519384], dtype=np.float32)
 
 selfIxnNrgWB97 = np.array([
     -0.500607632585,
     -37.8302333826,
     -54.5680045287,
     -75.0362229210], dtype=np.float32)
+
+# computed by jaguar uhf with default settings
+selfIxnNrgWB97X_631gdp = np.array([
+    -0.49932123901, # doublet hydrogen
+    -37.83271996200, # triplet carbon
+    -54.57325122225, # quartet nitrogen
+    -75.04147134502], # triplet oxygen
+    dtype=np.float32)
 
 # DFT-calculated self-interaction, not linear fitted
 selfIxnNrgMO62x = np.array([
@@ -279,10 +298,12 @@ def load_hdf5_files(
 
             else:
                 wb97offset = 0
+                wb97Xoffset = 0
                 mo62xoffset = 0
 
                 for z in Z:
                     wb97offset += selfIxnNrgWB97[z]
+                    wb97Xoffset += selfIxnNrgWB97X[z]
                     mo62xoffset += selfIxnNrgMO62x[z]
 
                 calibration_offset = 0
@@ -298,11 +319,105 @@ def load_hdf5_files(
                         continue
 
 
-                    y = E[k] - wb97offset + calibration_offset
+                    # LDJ: using wb97x offset 
+                    y = E[k] - wb97Xoffset + calibration_offset
                     ys.append(y)
 
                     X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
                     Xs.append(X)
 
     return Xs, ys
+
+def read_all_reactions(reactivity_dir):
+    """
+    Read reactivity data and return as a dict 
+
+    Returns two dicts for the "small" and "big" examples defined
+    by MAX_ATOM_LIMIT. The keys are filenames and values are lists of
+    examples.
+    """
+
+    skipped = 0
+    cnt = 0
+    reactions = {} 
+    big_reactions = {}
+    for root, dirs, files in os.walk(reactivity_dir):
+        for fname in files:
+            if fname.endswith(".json"):
+                X, Y = _read_reactivity_data(os.path.join(reactivity_dir, fname))
+                natoms = len(X[0])
+                if natoms < MAX_ATOM_LIMIT:
+                    reactions[fname[:-5]] = (X, Y)
+                else:
+                    big_reactions[fname[:-5]] = (X, Y)
+                    skipped += 1
+                cnt += 1
+
+    print("Found %d out of %d reactions with less than %d atoms" % (cnt-skipped, cnt, MAX_ATOM_LIMIT))
+
+    return reactions, big_reactions
+
+
+def load_reactivity_data(reactivity_dir, percent_test=0.5):
+    """
+    Load all reactivity data from a directory
+    split the reactions into testing/training sets (randomly)
+
+    returns two lists of data, the training and test set.
+    each element of the list is a tuple (X, Y) for that reaction
+    """
+
+    reactions_dict, big_reactions_dict = read_all_reactions(reactivity_dir)
+
+    reactions = list(reactions_dict.values())
+    big_reactions = list(big_reactions_dict.values())
+
+    # split by reaction type
+    if percent_test == 1.0:
+        test = reactions
+        train = []
+    elif percent_test == 0.0:
+        test = []
+        train = reactions
+    else:
+        train, test = train_test_split(reactions, test_size=percent_test)
+    Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest = ([], [], [], [], [], [])
+
+    # unpack each reaction into a list of X, Y values
+    for A, B in train:
+        Xtrain.extend(A)
+        Ytrain.extend(B)
+
+    for A, B in test:
+        Xtest.extend(A)
+        Ytest.extend(B)
+
+    for A, B in big_reactions:
+        Xbigtest.extend(A)
+        Ybigtest.extend(B)
+
+    
+    return Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest
+
+def _read_reactivity_data(fname):
+    """
+    Read data from json file prepared for QM data
+    there are two fields X and Y which hold the molecule definition
+    and a total energy respectively.
+    """
+
+    with open(fname) as fin:
+        data = json.load(fin)
+
+    X = data.get("X")
+    Y = list(map(np.float64, data.get("Y")))
+
+    # remove atomic energies
+    for i, mol in enumerate(X):
+        self_interaction = sum(selfIxnNrgWB97X_631gdp[at] for at, x, y, z in mol)
+        Y[i] -= self_interaction
+
+    X_np = [np.array(molecule, dtype=np.float32) for molecule in X]
+
+    return X_np, Y
 
