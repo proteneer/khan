@@ -38,8 +38,8 @@ def main():
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
         parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
         parser.add_argument('--cpus', default='1', help="Number of CPUs to use (GPUs override this if > 0)")
-        parser.add_argument('--start_batch_size', default='256', help="How many training points to consider before calculating each gradient")
-        parser.add_argument('--max_local_epoch_count', default='10', help="How many epochs to try each learning rate before reducing it")
+        parser.add_argument('--start_batch_size', default='64', help="How many training points to consider before calculating each gradient")
+        parser.add_argument('--max_local_epoch_count', default='50', help="How many epochs to try each learning rate before reducing it")
         parser.add_argument('--dataset_index', default='0', help="Index of training set to use")
         parser.add_argument('--testset_index', default='0', help="Index of test set to use")
 
@@ -53,12 +53,13 @@ def main():
 
         ANI_TRAIN_DIR = args.train_dir
         ANI_WORK_DIR = args.work_dir
-        GRAPH_DB_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/'
+        GRAPH_DB_TRAIN_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/train'
+        GRAPH_DB_TEST_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/test'
 
         CALIBRATION_FILE_TRAIN = os.path.join(ANI_TRAIN_DIR, "results_QM_M06-2X.txt")
         CALIBRATION_FILE_TEST = os.path.join(ANI_TRAIN_DIR, "gdb_11_cal.txt")
         ROTAMER_TRAIN_DIR = [ os.path.join(ANI_TRAIN_DIR, "rotamers/train"), os.path.join(ANI_TRAIN_DIR, "rotamers/test") ]
-        ROTAMER_TEST_DIR = GRAPH_DB_DIR
+        ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "rotamers/test")
         CHARGED_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "charged_rotamers_2")
         CCSDT_ROTAMER_TEST_DIR = os.path.join(ANI_TRAIN_DIR, "ccsdt_dataset")
 
@@ -73,7 +74,7 @@ def main():
 
         print("------------Load evaluation data--------------")
         
-        pickle_files = ['eval_data_graphdb.pickle', 'eval_data_old_fftest.pickle']
+        pickle_files = ['eval_new_graphdb.pickle', 'eval_data_old_fftest.pickle', 'eval_data_graphdb.pickle']
         pickle_file = pickle_files[ int(args.testset_index) ]
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
@@ -82,7 +83,10 @@ def main():
             print('gdb11')
             rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
             print('ff')
-            rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
+            if 'fftest' in pickle_file:
+                rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
+            elif 'graphdb' in pickle_file:
+                rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(GRAPH_DB_TEST_DIR)
             rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
             rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
             print('Pickling data...')
@@ -110,8 +114,8 @@ def main():
 
         #layer_sizes=(128, 128, 64, 1), # original
         #layer_sizes=(128, 128, 64, 8, 1)
-        #layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
-        layer_sizes=(64, 64, 64, 64, 8, 1)
+        layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
+        #layer_sizes=(64, 64, 64, 64, 8, 1)
         print('layer_sizes:', layer_sizes)
         n_weights = sum( [layer_sizes[i]*layer_sizes[i+1] for i in range(len(layer_sizes)-1)] )
         print('n_weights:', n_weights)
@@ -120,7 +124,7 @@ def main():
             sess,
             towers=towers,
             layer_sizes=layer_sizes,
-            so_file='gpu_featurizer/ani_num32_0.12.so')
+            so_file='gpu_featurizer/ani_smaller.so') # ani.so = Roitberg's big featurization, ani_small.so = Roitberg's small featurization, ani_0.24.so = longer-range, ani_0.18.so=medium, ani_0.14.so=a lot like ani.so. ani_new_small.so = test, identical to ani_small.so. ani_smaller.so = smaller than original small. 
 
         print("------------Load training data--------------")
         
@@ -130,17 +134,14 @@ def main():
             print('Loading pickle from', pickle_file)
             Xs, ys = pickle.load( open(pickle_file, "rb") )
         else:
-            if add_ffdata: # FOR TESTING ONLY
-                ff_train_dir = ROTAMER_TRAIN_DIR
-            else:
-                ff_train_dir = None
-            Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dir)
+            ff_train_dirs = ROTAMER_TRAIN_DIR + [GRAPH_DB_TRAIN_DIR]
+            Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dirs)
             print('Pickling data...')
             pickle.dump( (Xs, ys), open( pickle_file, "wb" ) )
 
         print("------------Initializing model--------------")
 
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.1) # stratify by UTT would be good to try here
+        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.3) # stratify by UTT would be good to try here
         rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
         print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
 
@@ -219,7 +220,9 @@ def main():
             print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
-            batch_size = min(batch_size*2, 65536) # bigger batches as fitting goes on, cap at 2^16
+            if batch_size < 2*15: # bigger batches as fitting goes on, cap at 2^16
+                batch_size *= 2
+                max_local_epoch_count *= 2
             trainer.load_best_params()
 
     return

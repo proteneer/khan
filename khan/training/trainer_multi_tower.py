@@ -12,8 +12,6 @@ from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 
-ani_mod = tf.load_op_library('gpu_featurizer/ani.so');
-
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
     """The gradients for `ani_charge`.

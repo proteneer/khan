@@ -35,6 +35,7 @@ class AtomNN():
 
         for idx in range(1, len(layer_sizes)):
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
+            print('Layer', idx, 'input/output size', x, y)
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
             with tf.device('/cpu:0'):
@@ -57,7 +58,8 @@ class AtomNN():
                     trainable=True
                 )
             #if idx != len(layer_sizes) - 1:
-            W = tf.clip_by_norm(W, 1.0, axes=1)
+            #tf.assign(W, tf.clip_by_norm(W, 2.0, axes=1))
+            #W = tf.clip_by_norm(W, 1.0, axes=1)
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
                 A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation

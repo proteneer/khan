@@ -11,7 +11,7 @@ CC_LINK_FLAGS=$(TF_LFLAGS)
 all: ani
 
 ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o ani_charges.o
-	$(CC) -shared -o ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+	$(CC) -shared -o ani_smaller.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
 functor_op_gpu.o: functor_op_gpu.cu functor_op.h parameters.h kernel.cuh
 	$(NVCC) functor_op_gpu.cu -c $(NVCC_FLAGS)
