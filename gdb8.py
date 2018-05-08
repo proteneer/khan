@@ -6,7 +6,7 @@ import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
-from data_utils import HARTREE_TO_KCAL_PER_MOL
+from data_utils import load_reactivity_data, HARTREE_TO_KCAL_PER_MOL, MAX_ATOM_LIMIT
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,6 +25,8 @@ def main():
 
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
+    parser.add_argument('--reactivity-dir', default=None, help='location of reactivity data')
+    parser.add_argument('--reactivity-test-percent', default=0.25, help='percent of reactions to put in test set')
 
     args = parser.parse_args()
 
@@ -45,8 +47,29 @@ def main():
     data_loader = DataLoader(False)
 
     all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
+    
 
     X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+
+    rd_rxn = None
+    rd_big_rxn = None
+    if args.reactivity_dir is not None:
+        # add training data
+        X_rxn_train, Y_rxn_train, X_rxn_test, Y_rxn_test, X_rxn_big, Y_rxn_big = load_reactivity_data(args.reactivity_dir, args.reactivity_test_percent)
+
+        X_train.extend(X_rxn_train)
+        y_train.extend(Y_rxn_train)
+
+        print("Number of reactivity points in training set {0:d}".format(len(Y_rxn_train)))
+        print("Number of reactivity points in test set {0:d}".format(len(Y_rxn_test)))
+
+        # keep reaction test set separate
+        rd_rxn = RawDataset(X_rxn_test, Y_rxn_test)
+        
+        # cannot currently handle this in test either
+        # everything over 32 atoms
+        #rd_big_rxn = RawDataset(X_rxn_big, Y_rxn_big)
+
     rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
@@ -125,12 +148,23 @@ def main():
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
+
                 if test_abs_rmse < best_test_score:
                     trainer.save_best_params()
                     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-
                     best_test_score = test_abs_rmse
+
+                    if rd_rxn is not None:
+                        rxn_abs_rmse = trainer.eval_abs_rmse(rd_rxn)
+                        print(' | reactivity abs rmse', "{0:.2f} kcal/mol | ".format(rxn_abs_rmse), end='')
+                        best_test_score += rxn_abs_rmse
+
+                    if rd_big_rxn is not None:
+                        big_rxn_abs_rmse = trainer.eval_abs_rmse(rd_big_rxn)
+                        print(' | > {1:d} atom reactivity abs rmse', "{0:.2f} kcal/mol | ".format(rxn_abs_rmse, MAX_ATOM_LIMIT), end='')
+                        best_test_score += big_rxn_abs_rmse
+
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
