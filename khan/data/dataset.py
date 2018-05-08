@@ -3,6 +3,9 @@ import math
 import numpy as np
 import tensorflow as tf
 
+#LDJ bump this
+MAXATOM = 1024
+
 class RawDataset():
 
     def __init__(self, all_Xs, all_ys=None):
@@ -129,7 +132,7 @@ class RawDataset():
 
                 # (ytz): do *not* remove this line. It's a super important sanity check since our
                 # GPU kernels do not support larger than 32 atoms.
-                if len(mol) > 32:
+                if len(mol) > MAXATOM:
                     print("FATAL: Molecules with more than 32 atoms are not supported.")
                     assert 0
 
