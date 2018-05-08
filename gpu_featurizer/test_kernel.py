@@ -10,6 +10,33 @@ import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
 
+@ops.RegisterGradient("AniCharge")
+def _ani_charge_grad(op, grads):
+    """The gradients for `ani_charge`.
+
+    Args:
+
+        op: The `ani_charge` `Operation` that we are differentiating, which we can use
+          to find the inputs and outputs of the original op.
+        grad: Gradient with respect to the output of the `ani_charge` op.
+
+    Returns:
+        Gradients with respect to the input of `ani_charge`.
+    """
+    global ani_mod
+    assert ani_mod is not None
+    x,y,z,qs,mo,macs = op.inputs
+    dydx = ani_mod.ani_charge_grad(x,y,z,qs,mo,macs,grads)
+    result = [
+        None,
+        None,
+        None,
+        dydx,
+        None,
+        None,
+    ]
+    return result
+
 @ops.RegisterGradient("Featurize")
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     x,y,z,a,mo,macs,sis,acs = op.inputs
@@ -73,9 +100,10 @@ class TestFeaturizer(unittest.TestCase):
 
     def setUp(self):
 
-        # cp = tf.ConfigProto(log_device_placement=True, allow_soft_placement=False, device_count = {'GPU': 1})
+        cp = tf.ConfigProto(log_device_placement=True, device_count = {'GPU': 1})
+        self.sess = tf.Session(config=cp)
 
-        self.sess = tf.Session()
+        # self.sess = tf.Session()
 
     def tearDown(self):
 
@@ -190,10 +218,10 @@ class TestFeaturizer(unittest.TestCase):
         return np.array(all_feats)
 
 
-
     def test_featurizer(self):
 
 
+        # 8 + 3 atoms
         atom_matrix = np.array([
             [0, 1.0, 2.0, 3.0], # H
             [2, 2.0, 1.0, 4.0], # N
@@ -276,17 +304,67 @@ class TestFeaturizer(unittest.TestCase):
         np.testing.assert_almost_equal(obtained_features[:8, 64:], expected_features_mol1[:, 64:], decimal=6)
         np.testing.assert_almost_equal(obtained_features[8:, 64:], expected_features_mol2[:, 64:], decimal=6)
 
-        grad_op = tf.gradients(f0, [ph_xs, ph_ys, ph_zs])
 
-        grads = self.sess.run(grad_op, feed_dict={
-            ph_xs: x,
-            ph_ys: y,
-            ph_zs: z,
-            ph_mol_idxs: mol_idxs,
-            ph_atom_types: atom_types
-        })
+        # test charges
+        ph_qs = tf.placeholder(dtype=tf.float32);
+
+        charge_energy = ani_mod.ani_charge(
+            ph_xs,
+            ph_ys,
+            ph_zs,
+            ph_qs,
+            mol_offsets,
+            mol_atom_counts
+        )
+
 
         with self.sess:
+
+            qs = np.array([
+                0.3,
+                4.5,
+                2.2,
+                3.4,
+                -5.6,
+                3.4,
+                1.1,
+                3.2,
+
+                1.0,
+                0.3,
+                2.4], dtype=np.float32)
+
+
+            # test dL/dq
+            error = tf.test.compute_gradient_error(
+                ph_qs,
+                (11,),
+                charge_energy,
+                (2,),
+                x_init_value=qs,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
+
+
+            # test featurization
+            grad_op = tf.gradients(f0, [ph_xs, ph_ys, ph_zs])
+
+            grads = self.sess.run(grad_op, feed_dict={
+                ph_xs: x,
+                ph_ys: y,
+                ph_zs: z,
+                ph_mol_idxs: mol_idxs,
+                ph_atom_types: atom_types
+            })
 
             error = tf.test.compute_gradient_error(
                 ph_xs,
