@@ -427,7 +427,6 @@ class TrainerMultiTower():
         all_grads = []
 
         for batch_g, batch_m in zip(ordered_grads, ordered_mos):
-            # should have 1024 per batch?
             res = np.split(np.vstack(batch_g).reshape(-1, 3), batch_m)
             all_grads.extend(res)
 
