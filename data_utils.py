@@ -370,13 +370,15 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
         Xbigtest.extend(A)
         Ybigtest.extend(B)
 
-    print("can train %d out of %d reactions" % (cnt-skipped, cnt))
+    print("Found %d out of %d reactions with less than %d atoms" % (cnt-skipped, cnt, MAX_ATOM_LIMIT))
     
     return Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest
 
 def _read_reactivity_data(fname):
     """
     Read data from json file prepared for QM data
+    there are two fields X and Y which hold the molecule definition
+    and a total energy respectively.
     """
 
     with open(fname) as fin:
