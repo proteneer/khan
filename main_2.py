@@ -8,7 +8,7 @@ from tensorflow.python.client import device_lib
 import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results
+from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
@@ -34,6 +34,7 @@ def main():
 
         parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
+        parser.add_argument('--ani_lib', required=True, help="Location of the shared object for GPU featurization")
         parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted energy corrections")
         parser.add_argument('--add_ffdata', default=True, action='store_true', help="Whether or not to add the forcefield data")
         parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
@@ -50,6 +51,11 @@ def main():
         args = parser.parse_args()
 
         print("Arguments", args)
+
+        lib_path = os.path.abspath(args.ani_lib)
+        print("Loading custom kernel from", lib_path)
+        initialize_module(lib_path)
+
 
         ANI_TRAIN_DIR = args.train_dir
         ANI_WORK_DIR = args.work_dir
@@ -81,14 +87,18 @@ def main():
             rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x = pickle.load( open(pickle_file, "rb") )
         else:
             print('gdb11')
-            rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
+            xs, ys = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
+            rd_gdb11 = RawDataset(xs, ys)
             print('ff')
             if 'fftest' in pickle_file:
-                rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
+                xs, ys, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
             elif 'graphdb' in pickle_file:
-                rd_ffneutral_mo62x, ffneutral_groups_mo62x = data_loader.load_ff(GRAPH_DB_TEST_DIR)
-            rd_ffneutral_ccsdt, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
-            rd_ffcharged_mo62x, ffcharged_groups_mo62x = data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
+                xs, ys, ffneutral_groups_mo62x = data_loader.load_ff(GRAPH_DB_TEST_DIR)     
+            rd_ffneutral_mo62x = RawDataset(xs, ys)
+            xs, ys, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
+            rd_ffneutral_ccsdt = RawDataset(xs, ys)
+            xs, ys, ffcharged_groups_mo62x =  data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
+            rd_ffcharged_mo62x = RawDataset(xs, ys)
             print('Pickling data...')
             pickle.dump( (rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x), open( pickle_file, "wb" ) )
 
@@ -123,8 +133,7 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=layer_sizes,
-            so_file='gpu_featurizer/ani_smaller.so') # ani.so = Roitberg's big featurization, ani_small.so = Roitberg's small featurization, ani_0.24.so = longer-range, ani_0.18.so=medium, ani_0.14.so=a lot like ani.so. ani_new_small.so = test, identical to ani_small.so. ani_smaller.so = smaller than original small. 
+            layer_sizes=layer_sizes)
 
         print("------------Load training data--------------")
         
@@ -186,7 +195,8 @@ def main():
                         rd_train,
                         shuffle=True,
                         target_ops=train_ops, # note: evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time
-                        batch_size=batch_size)
+                        batch_size=batch_size,
+                        before_hooks=trainer.max_norm_ops)
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     #print('train_abs_rmse: %f, %.2fs' % (train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]

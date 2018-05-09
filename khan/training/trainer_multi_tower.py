@@ -12,6 +12,37 @@ from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 
+ani_mod = None
+
+@ops.RegisterGradient("Featurize")
+def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
+    x,y,z,a,mo,macs,sis,acs = op.inputs
+    dx, dy, dz = ani_mod.featurize_grad(
+        x,
+        y,
+        z,
+        a,
+        mo,
+        macs,
+        sis,
+        acs,
+        grad_hs,
+        grad_cs,
+        grad_ns,
+        grad_os
+    )
+
+    return [
+        dx,
+        dy,
+        dz,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
     """The gradients for `ani_charge`.
@@ -25,7 +56,8 @@ def _ani_charge_grad(op, grads):
     Returns:
         Gradients with respect to the input of `ani_charge`.
     """
-
+    global ani_mod
+    assert ani_mod is not None
     x,y,z,qs,mo,macs = op.inputs
     dydx = ani_mod.ani_charge_grad(x,y,z,qs,mo,macs,grads)
     result = [
@@ -38,6 +70,12 @@ def _ani_charge_grad(op, grads):
     ]
     return result
 
+
+def initialize_module(so_file):
+    global ani_mod
+    if ani_mod is not None:
+        raise Exception("Module has already been initialized")
+    ani_mod = tf.load_op_library(so_file)
 
 
 def flatten_results(res, pos=0):
@@ -89,8 +127,7 @@ class TrainerMultiTower():
         sess,
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
-        so_file='gpu_featurizer/ani.so',
-        fit_charges=False
+        fit_charges=False,
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -101,7 +138,6 @@ class TrainerMultiTower():
         sess: tf.Session
             A tensorflow session under which we use
         """
-        self.ani_mod = tf.load_op_library(so_file)
         self.towers = towers
         self.num_towers = len(towers)
 
@@ -144,7 +180,7 @@ class TrainerMultiTower():
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
-                    epsilon=1e-3) # default is 1e-8
+                    epsilon=1e-8) # default is 1e-8
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.5))
@@ -159,6 +195,8 @@ class TrainerMultiTower():
             self.tower_preds = []
             self.tower_bids = []
             self.tower_l2s = []
+            self.tower_mos = []
+            self.tower_coord_grads = []
             self.all_models = []
             self.tower_exp_loss = []
 
@@ -174,10 +212,13 @@ class TrainerMultiTower():
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
-                                scatter_idxs, gather_idxs, atom_counts = self.ani_mod.ani_sort(a_deq)
+
+                                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
+
+                                self.tower_mos.append(mol_offsets)
 
                             with tf.device(tower_device):
-                                f0, f1, f2, f3 = self.ani_mod.featurize(
+                                f0, f1, f2, f3 = ani_mod.featurize(
                                     x_deq,
                                     y_deq,
                                     z_deq,
@@ -229,10 +270,7 @@ class TrainerMultiTower():
                                 tower_pred = tower_near_energy
 
                             self.tower_preds.append(tower_pred)
-                            #high_E = 20.0 / HARTREE_TO_KCAL_PER_MOL
-                            #error_weighting = tf.rsqrt( tf.maximum(labels-high_E, 1.0) ) # ASSUMES LABELS ARE CENTERED AROUND ZERO AND RELATED TO STABILITY
                             tower_l2 = tf.squared_difference(tower_pred, labels)
-                            #tower_l2 = tf.multiply(tower_l2, error_weighting)
                             self.tower_l2s.append(tower_l2)
 
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
@@ -240,12 +278,10 @@ class TrainerMultiTower():
 
                             tf.get_variable_scope().reuse_variables()
                             self.tower_exp_loss.append(tower_exp_loss)
-                            tower_grad = self.optimizer.compute_gradients(
-                                tower_exp_loss,
-                                #var_list=tf.trainable_variables()[tower_idx:tower_idx+1], # could set this to a per-tower list for performance?
-                                gate_gradients=self.optimizer.GATE_NONE, # risky, allows computation of gradients to be asynchronous with use. Safer way is GATE_OP. 
-                                colocate_gradients_with_ops=True) # tries putting gradient on same GPU as its op
+                            tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
                             self.tower_grads.append(tower_grad)
+
+                            self.tower_coord_grads.append(tf.gradients(tower_pred, [x_deq, y_deq, z_deq]))
 
             self.best_params = []
             self.save_best_params_ops = []
@@ -266,12 +302,17 @@ class TrainerMultiTower():
             self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
         ws = self._weight_matrices()
+        max_norm_ops = []
+        for w in ws:
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
+        self.max_norm_ops = max_norm_ops
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
         #self.unordered_l2s += l2_norm_k * tf.norm(ws) # one way to enforce an l2 norm
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
+
 
     def initialize(self):
         """
@@ -352,6 +393,44 @@ class TrainerMultiTower():
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
+    def coordinate_gradients(self, dataset, batch_size=1024):
+        """
+        Compute gradients for a dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset from which we predict from.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        list of gradients
+            Returns a list of num_atoms x 3 gradients for each molecule
+
+        """
+        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_coord_grads, self.tower_mos, self.tower_bids], batch_size=batch_size)
+
+        ordered_grads = []
+        ordered_mos = []
+
+        for (grad, mo, ids) in results:
+            idxs =  np.argsort(ids)
+            sorted_grads = np.take(grad, idxs, axis=0)
+            sorted_mos = np.take(mo, idxs, axis=0)
+            ordered_grads.extend(sorted_grads)
+            ordered_mos.extend(sorted_mos)
+
+        all_grads = []
+
+        for batch_g, batch_m in zip(ordered_grads, ordered_mos):
+            res = np.split(np.vstack(batch_g).reshape(-1, 3), batch_m)
+            all_grads.extend(res)
+
+        return all_grads
+
     def predict(self, dataset, batch_size=1024):
         """
         Infer y-values given a dataset.
@@ -385,7 +464,8 @@ class TrainerMultiTower():
         dataset,
         shuffle,
         target_ops,
-        batch_size):
+        batch_size,
+        before_hooks=None):
         """
         Feed a dataset into the trainer under arbitrary ops.
 
@@ -402,6 +482,10 @@ class TrainerMultiTower():
 
         batch_size: int
             Size of the batch for which we iterate the dataset over.
+
+        hooks: list of tf.Ops
+            List of tensorflow ops which we run before every batch. Note that currently
+            these ops must have no feed_dict dependency.
 
         """
 
@@ -430,6 +514,8 @@ class TrainerMultiTower():
 
                 for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
+                    if before_hooks:
+                        self.sess.run(before_hooks)
                     self.sess.run(self.put_op, feed_dict={
                         self.x_enq: mol_xs[:, 1],
                         self.y_enq: mol_xs[:, 2],
@@ -439,11 +525,15 @@ class TrainerMultiTower():
                         self.yt_enq: mol_yts,
                         self.bi_enq: b_idx
                     })
+
+
                     g_b_idx += 1
 
                 remainder = n_batches % self.num_towers
                 if remainder:
                     for _ in range(self.num_towers - remainder):
+                        if before_hooks:
+                            self.sess.run(before_hooks)
                         self.sess.run(self.put_op, feed_dict={
                             self.x_enq: np.zeros((0, 1), dtype=np.float32),
                             self.y_enq: np.zeros((0, 1), dtype=np.float32),

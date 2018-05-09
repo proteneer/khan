@@ -1,6 +1,6 @@
-CUDA_INCLUDE_FLAGS=-I ./symlink -I ./
+CUDA_INCLUDE_FLAGS=-I /usr/local/
 NVCC=nvcc
-TF_CFLAGS=-I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
+TF_CFLAGS=-I/nfs/utils/stow/cuda-8.0/include/ -I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
 TF_LFLAGS=-L/home/yzhao/venv/lib/python3.5/site-packages/tensorflow -ltensorflow_framework
 
 NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
@@ -10,8 +10,11 @@ CC_LINK_FLAGS=$(TF_LFLAGS)
 
 all: ani
 
-ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o ani_charges.o
-	$(CC) -shared -o ani_smaller.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o ani_charges.o ani_charges_gpu.o
+	$(CC) -shared -o ani_smaller_q.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+
+ani_charges_gpu.o: ani_charges_gpu.cu parameters.h
+	$(NVCC) ani_charges_gpu.cu -c $(NVCC_FLAGS)
 
 functor_op_gpu.o: functor_op_gpu.cu functor_op.h parameters.h kernel.cuh
 	$(NVCC) functor_op_gpu.cu -c $(NVCC_FLAGS)

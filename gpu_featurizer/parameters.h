@@ -7,6 +7,7 @@
     #define CONSTANT_FLAGS
 #endif
 
+const float CHARGE_CONSTANT = 0.529176917;
 
 /* from github repo */
 

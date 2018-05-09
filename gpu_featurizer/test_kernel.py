@@ -5,13 +5,66 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import tensorflow as tf
+from tensorflow.python.framework import ops
 import numpy as np
 
 ani_mod = tf.load_op_library('ani.so');
-# sort_lib = tf.load_op_library('ani_sort.so');
 
-from tensorflow.python import debug as tf_debug
+@ops.RegisterGradient("AniCharge")
+def _ani_charge_grad(op, grads):
+    """The gradients for `ani_charge`.
 
+    Args:
+
+        op: The `ani_charge` `Operation` that we are differentiating, which we can use
+          to find the inputs and outputs of the original op.
+        grad: Gradient with respect to the output of the `ani_charge` op.
+
+    Returns:
+        Gradients with respect to the input of `ani_charge`.
+    """
+    global ani_mod
+    assert ani_mod is not None
+    x,y,z,qs,mo,macs = op.inputs
+    dydx = ani_mod.ani_charge_grad(x,y,z,qs,mo,macs,grads)
+    result = [
+        None,
+        None,
+        None,
+        dydx,
+        None,
+        None,
+    ]
+    return result
+
+@ops.RegisterGradient("Featurize")
+def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
+    x,y,z,a,mo,macs,sis,acs = op.inputs
+    dx, dy, dz = ani_mod.featurize_grad(
+        x,
+        y,
+        z,
+        a,
+        mo,
+        macs,
+        sis,
+        acs,
+        grad_hs,
+        grad_cs,
+        grad_ns,
+        grad_os
+    )
+
+    return [
+        dx,
+        dy,
+        dz,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
 
 def linearize(i, j, k, l):
     if j < i:
@@ -47,9 +100,10 @@ class TestFeaturizer(unittest.TestCase):
 
     def setUp(self):
 
-        cp = tf.ConfigProto(log_device_placement=True, allow_soft_placement=False, device_count = {'GPU': 1})
-
+        cp = tf.ConfigProto(log_device_placement=True, device_count = {'GPU': 1})
         self.sess = tf.Session(config=cp)
+
+        # self.sess = tf.Session()
 
     def tearDown(self):
 
@@ -164,10 +218,10 @@ class TestFeaturizer(unittest.TestCase):
         return np.array(all_feats)
 
 
-
     def test_featurizer(self):
 
 
+        # 8 + 3 atoms
         atom_matrix = np.array([
             [0, 1.0, 2.0, 3.0], # H
             [2, 2.0, 1.0, 4.0], # N
@@ -180,21 +234,22 @@ class TestFeaturizer(unittest.TestCase):
 
             [0, 2.3, 0.2, 0.4], # H
             [1, 0.3, 1.7, 3.2], # C
-            [2, 0.6, 1.2, 1.1]], dtype=np.float32)
+            [2, 0.6, 1.2, 1.1], # N
+            ], dtype=np.float32)
 
 
         mol_idxs = np.array([0,0,0,0,0,0,0,0,1,1,1], dtype=np.int32)
 
-        atom_types = atom_matrix[:, 0]
+        atom_types = atom_matrix[:, 0].astype(np.int32)
         x = atom_matrix[:, 1]
         y = atom_matrix[:, 2]
         z = atom_matrix[:, 3]
 
-        ph_atom_types = tf.placeholder(dtype=np.int32)
-        ph_xs = tf.placeholder(dtype=np.float32)
-        ph_ys = tf.placeholder(dtype=np.float32)
-        ph_zs = tf.placeholder(dtype=np.float32)
-        ph_mol_idxs = tf.placeholder(dtype=np.int32)
+        ph_atom_types = tf.placeholder(dtype=np.int32, name="atom_types")
+        ph_xs = tf.placeholder(dtype=np.float32, name="xs")
+        ph_ys = tf.placeholder(dtype=np.float32, name="ys")
+        ph_zs = tf.placeholder(dtype=np.float32, name="zs")
+        ph_mol_idxs = tf.placeholder(dtype=np.int32, name="mol_idxs")
 
         scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(ph_atom_types)
 
@@ -223,7 +278,10 @@ class TestFeaturizer(unittest.TestCase):
             atom_counts
         )
 
-        f0, f1, f2, f3 = tf.reshape(f0, (-1, 384)), tf.reshape(f1, (-1, 384)), tf.reshape(f2, (-1, 384)), tf.reshape(f3, (-1, 384))
+        FEATURE_SIZE = 384
+
+        f0, f1, f2, f3 = tf.reshape(f0, (-1, FEATURE_SIZE)), tf.reshape(f1, (-1, FEATURE_SIZE)), tf.reshape(f2, (-1, FEATURE_SIZE)), tf.reshape(f3, (-1, FEATURE_SIZE))
+    
         scattered_features = tf.concat([f0, f1, f2, f3], axis=0)
         features = tf.gather(scattered_features, gather_idxs)
             
@@ -245,6 +303,122 @@ class TestFeaturizer(unittest.TestCase):
         # angular components
         np.testing.assert_almost_equal(obtained_features[:8, 64:], expected_features_mol1[:, 64:], decimal=6)
         np.testing.assert_almost_equal(obtained_features[8:, 64:], expected_features_mol2[:, 64:], decimal=6)
+
+
+        # test charges
+        ph_qs = tf.placeholder(dtype=tf.float32);
+
+        charge_energy = ani_mod.ani_charge(
+            ph_xs,
+            ph_ys,
+            ph_zs,
+            ph_qs,
+            mol_offsets,
+            mol_atom_counts
+        )
+
+
+        with self.sess:
+
+            qs = np.array([
+                0.3,
+                4.5,
+                2.2,
+                3.4,
+                -5.6,
+                3.4,
+                1.1,
+                3.2,
+
+                1.0,
+                0.3,
+                2.4], dtype=np.float32)
+
+
+            # test dL/dq
+            error = tf.test.compute_gradient_error(
+                ph_qs,
+                (11,),
+                charge_energy,
+                (2,),
+                x_init_value=qs,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
+
+
+            # test featurization
+            grad_op = tf.gradients(f0, [ph_xs, ph_ys, ph_zs])
+
+            grads = self.sess.run(grad_op, feed_dict={
+                ph_xs: x,
+                ph_ys: y,
+                ph_zs: z,
+                ph_mol_idxs: mol_idxs,
+                ph_atom_types: atom_types
+            })
+
+            error = tf.test.compute_gradient_error(
+                ph_xs,
+                x.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=x,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
+
+
+            error = tf.test.compute_gradient_error(
+                ph_ys,
+                y.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=y,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
+
+            error = tf.test.compute_gradient_error(
+                ph_zs,
+                z.shape,
+                features,
+                (11, FEATURE_SIZE),
+                x_init_value=z,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
+
+
 
 
 if __name__ == "__main__":

@@ -34,8 +34,6 @@ static inline float dist_diff(float dx, float dy, float dz) {
 
 }
 
-const float K_CONST = 0.529176917;
-
 inline float f_C(float r_ij, float r_c) {
     if (r_ij <= r_c) {
         return 0.5 * cosf((M_PI * r_ij) / r_c) + 0.5;
@@ -65,10 +63,7 @@ float charge_energy(const float *xs,  const float *ys, const float *zs, const fl
       float dy = ys[i] - ys[j];
       float dz = zs[i] - zs[j];
       float r = dist_diff(dx, dy, dz);
-      if(std::isnan(r)) {
-        std::cout << "OMFG NAN" << dx << " " << dy << " " << dz << std::endl;
-      }
-      energy += K_CONST*qs[i]*qs[j]*(1-f_C(r, R_Rc))/r;
+      energy += CHARGE_CONSTANT*qs[i]*qs[j]*(1-f_C(r, R_Rc))/r;
     }
   }
   // std::cout << "energy:" << energy << std::endl;
@@ -138,21 +133,26 @@ REGISTER_OP("AniChargeGrad")
   });
 
 
-float charge_grads(const float *xs,  const float *ys, const float *zs, const float *qs, size_t num_atoms, float *q_grads, float grad) {
+float charge_grads(const float *xs,  const float *ys, const float *zs, const float *qs, size_t num_atoms, float *q_grads, float nrg_grad) {
   for(size_t i=0; i < num_atoms; i++) {
-    float q_grad = 0;
+    float q_grad_i = 0;
     // note: this start at 0 unlike the energy calculation
-    for(size_t j=0; j < num_atoms; j++) {
+    for(size_t j=i+1; j < num_atoms; j++) {
       if(i==j) {
         continue;
       }
       float dx = xs[i] - xs[j];
       float dy = ys[i] - ys[j];
       float dz = zs[i] - zs[j];
+      
       float r = dist_diff(dx, dy, dz);
-      q_grad += grad*K_CONST*qs[j]*(1-f_C(r, R_Rc))/r;
+      // accum i locally
+      q_grad_i += nrg_grad*CHARGE_CONSTANT*qs[j]*(1-f_C(r, R_Rc))/r;
+
+      // accum j globally
+      q_grads[j] += nrg_grad*CHARGE_CONSTANT*qs[i]*(1-f_C(r, R_Rc))/r;
     }
-    q_grads[i] = q_grad;
+    q_grads[i] += q_grad_i;
   }
 }
 
@@ -191,6 +191,8 @@ class AniChargeGrad : public OpKernel {
 
     float* grad_vals = q_grads->flat<float>().data(); // uninitialized but safe
 
+    memset(grad_vals, 0, total_num_atoms*sizeof(float));
+
     // (ytz): probably parallelizable at some point
     for(size_t m_idx=0; m_idx < num_mols; m_idx++) {
 
@@ -212,9 +214,11 @@ class AniChargeGrad : public OpKernel {
 };
 
 
+
 REGISTER_KERNEL_BUILDER(
   Name("AniCharge").Device(DEVICE_CPU), AniCharge
 );
+
 
 REGISTER_KERNEL_BUILDER(
   Name("AniChargeGrad").Device(DEVICE_CPU), AniChargeGrad

@@ -2,22 +2,23 @@ import os
 import numpy as np
 import time
 import tensorflow as tf
+import sklearn.model_selection
 
-from khan.training.trainer import Trainer, flatten_results
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results
-
+from khan.data.dataset import RawDataset
+from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import multiprocessing
-
 import argparse
+
 
 def main():
 
     parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
+    parser.add_argument('--ani_lib', required=True, help="Location of the shared object for GPU featurization")
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
     parser.add_argument('--gpus', default=1, help="Number of gpus we use")
@@ -29,6 +30,10 @@ def main():
 
     print("Arguments", args)
 
+    lib_path = os.path.abspath(args.ani_lib)
+    print("Loading custom kernel from", lib_path)
+    initialize_module(lib_path)
+
     ANI_TRAIN_DIR = args.train_dir
     ANI_WORK_DIR = args.work_dir
 
@@ -39,8 +44,13 @@ def main():
 
     data_loader = DataLoader(False)
 
-    rd_train, rd_test = data_loader.load_gdb8(ANI_TRAIN_DIR)
-    rd_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
+    all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
+
+    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+
+    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
+    rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
     batch_size = 1024
 
@@ -53,7 +63,6 @@ def main():
         # score is detected, we save the model's parameters as the putative best found parameters. If after more than
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
-
 
         n_gpus = int(args.gpus)
         if n_gpus > 0:
@@ -88,6 +97,10 @@ def main():
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
+        # Uncomment if you'd like gradients for a dataset
+        # for grad in trainer.coordinate_gradients(rd_test):
+        #     print(grad.shape)
+
         print("------------Starting Training--------------")
 
         start_time = time.time()
@@ -103,7 +116,8 @@ def main():
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
-                    batch_size=batch_size)
+                    batch_size=batch_size,
+                    before_hooks=trainer.max_norm_ops)
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time

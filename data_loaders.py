@@ -2,7 +2,6 @@ import numpy as np
 import os
 
 import time
-from khan.data.dataset import RawDataset
 import data_utils
 
 def load_calibration_file(calibration_file):
@@ -81,9 +80,9 @@ class DataLoader():
         calibration_map=cal_map,
         use_fitted=self.use_fitted)
 
-        return RawDataset(X_gdb11, y_gdb11)
+        return X_gdb11, y_gdb11
 
     def load_ff(self, data_dir):
         ff_test_Xs, ff_test_ys, ff_groups = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
-        return RawDataset(ff_test_Xs, ff_test_ys), ff_groups
 
+        return ff_test_Xs, ff_test_ys, ff_groups
