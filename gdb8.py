@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
     parser.add_argument('--reactivity-dir', default=None, help='location of reactivity data')
-    parser.add_argument('--reactivity-test-percent', default=0.25, help='percent of reactions to put in test set')
+    parser.add_argument('--reactivity-test-percent', default=0.25, type=float, help='percent of reactions to put in test set')
 
     args = parser.parse_args()
 
@@ -64,7 +64,10 @@ def main():
         print("Number of reactivity points in test set {0:d}".format(len(Y_rxn_test)))
 
         # keep reaction test set separate
-        rd_rxn = RawDataset(X_rxn_test, Y_rxn_test)
+        rd_rxn_test = RawDataset(X_rxn_test, Y_rxn_test) if X_rxn_test else None
+        rd_rxn_train = RawDataset(X_rxn_train, Y_rxn_train) if X_rxn_train else None
+        # redundant, can be eliminated
+        rd_rxn_all = RawDataset(X_rxn_test + X_rxn_train, Y_rxn_test + Y_rxn_train)
         
         # cannot currently handle this in test either
         # everything over 32 atoms
@@ -99,7 +102,6 @@ def main():
             sess,
             towers=towers,
             layer_sizes=(128, 128, 64, 1),
-            fit_charges=True
         )
 
         if os.path.exists(save_dir):
@@ -155,15 +157,13 @@ def main():
                     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                     best_test_score = test_abs_rmse
 
-                    if rd_rxn is not None:
-                        rxn_abs_rmse = trainer.eval_abs_rmse(rd_rxn)
-                        print(' | reactivity abs rmse', "{0:.2f} kcal/mol | ".format(rxn_abs_rmse), end='')
-                        best_test_score += rxn_abs_rmse
+                    for rd, name in [(rd_rxn_train, "train"), (rd_rxn_test, "test"), (rd_rxn_all, "all")]:
+                        if rd is not None:
+                            rxn_abs_rmse = trainer.eval_abs_rmse(rd)
+                            print(' | reactivity abs rmse ({0:s})'.format(name), "{0:.2f} kcal/mol | ".format(rxn_abs_rmse), end='')
+                            if name == "test":
+                                best_test_score += rxn_abs_rmse
 
-                    if rd_big_rxn is not None:
-                        big_rxn_abs_rmse = trainer.eval_abs_rmse(rd_big_rxn)
-                        print(' | > {1:d} atom reactivity abs rmse', "{0:.2f} kcal/mol | ".format(rxn_abs_rmse, MAX_ATOM_LIMIT), end='')
-                        best_test_score += big_rxn_abs_rmse
 
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
                 else:

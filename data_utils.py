@@ -353,8 +353,16 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
                     skipped += 1
                 cnt += 1
 
+    print("Found %d out of %d reactions with less than %d atoms" % (cnt-skipped, cnt, MAX_ATOM_LIMIT))
     # split by reaction type
-    train, test = train_test_split(reactions, test_size=percent_test)
+    if percent_test == 1.0:
+        test = reactions
+        train = []
+    elif percent_test == 0.0:
+        test = []
+        train = reactions
+    else:
+        train, test = train_test_split(reactions, test_size=percent_test)
     Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest = ([], [], [], [], [], [])
 
     # unpack each reaction into a list of X, Y values
@@ -370,7 +378,6 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
         Xbigtest.extend(A)
         Ybigtest.extend(B)
 
-    print("Found %d out of %d reactions with less than %d atoms" % (cnt-skipped, cnt, MAX_ATOM_LIMIT))
     
     return Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest
 
