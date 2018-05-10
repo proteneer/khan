@@ -1,3 +1,8 @@
+# Makefile for the custom tensorflow ops required for ANI-1
+# By default, this will attempt to build the GPU kernels with NVCC in addition to the CPU kernels.
+# If you'd like to build only the cpu kernel, please run: make ani_cpu
+# This will generate a cpu only ani_cpu.so file that can be run on machines with or without GPUs.
+
 CUDA_INCLUDE_FLAGS=-I ./symlink -I ./
 NVCC=nvcc
 TF_CFLAGS=-I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
@@ -10,8 +15,11 @@ CC_LINK_FLAGS=$(TF_LFLAGS)
 
 all: ani
 
-ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op.o ani_sort.o ani_charges.o ani_charges_gpu.o
-	$(CC) -shared -o ani_q.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op_gpu.o ani_sort.o ani_charges.o ani_charges_gpu.o
+	$(CC) -shared -o ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op_gpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+
+ani_cpu: functor_op_cpu.o kernel_cpu.o ani_op_cpu.o ani_sort.o ani_charges.o
+	$(CC) -shared -o ani_cpu.so functor_op_cpu.o kernel_cpu.o ani_charges.o ani_op_cpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
 ani_charges_gpu.o: ani_charges_gpu.cu parameters.h
 	$(NVCC) ani_charges_gpu.cu -c $(NVCC_FLAGS)
@@ -28,8 +36,11 @@ kernel_cpu.o: kernel_cpu.cpp parameters.h
 functor_op_cpu.o: functor_op_cpu.cpp functor_op.h parameters.h kernel_cpu.h
 	$(CC) functor_op_cpu.cpp -c $(CC_FLAGS)
 
-ani_op.o: ani_op.cpp functor_op.h parameters.h
-	$(CC) ani_op.cpp -c $(CC_FLAGS)
+ani_op_gpu.o: ani_op.cpp functor_op.h parameters.h
+	$(CC) -o ani_op_gpu.o ani_op.cpp -D ANI_GPU -c $(CC_FLAGS)
+
+ani_op_cpu.o: ani_op.cpp functor_op.h parameters.h
+	$(CC) -o ani_op_cpu.o ani_op.cpp -c $(CC_FLAGS)
 
 ani_sort.o: ani_sort.cpp
 	$(CC) ani_sort.cpp -c $(CC_FLAGS)

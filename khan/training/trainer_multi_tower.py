@@ -245,8 +245,7 @@ class TrainerMultiTower():
                                 prefix="near_")
 
                             self.all_models.append(tower_model_near)
-                            tower_near_energy = tf.reshape(tf.segment_sum(tower_model_near.atom_outputs, m_deq), (-1,))
-
+                            tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
                             if fit_charges:
                                 tower_model_charges = MoleculeNN(
                                     type_map=["H", "C", "N", "O"],
@@ -257,6 +256,15 @@ class TrainerMultiTower():
 
                                 self.all_models.append(tower_model_charges)
                                 tower_charges = tower_model_charges.atom_outputs
+
+                                # (ytz + stevenso): we want to normalize the compute the charge per molecule
+                                # note that this only works for *neutral* molecules. For molecules that have a formal charge
+                                # we want to specify correct differently, or turn off the normalization entirely.
+                                tower_charges_per_mol = tf.segment_sum(tower_charges, m_deq) # per molecule charge
+                                tower_charges_per_mol = tf.divide(tower_charges_per_mol, tf.cast(mol_atom_counts, dtype=tf.float32)) # per molecule avg charge
+                                tower_charge_correction = tf.gather(tower_charges_per_mol, m_deq) # generate the per atom correction
+                                tower_charges = tf.subtract(tower_charges, tower_charge_correction) # zero out the charge
+
                                 tower_far_energy = ani_mod.ani_charge(
                                     x_deq,
                                     y_deq,

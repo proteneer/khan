@@ -167,6 +167,7 @@ class MoleculeNN():
             atom_type_nrgs.append(ann.atom_energies())
 
         self.atom_outputs = tf.gather(tf.concat(atom_type_nrgs, axis=0), gather_idxs)
+        self.atom_outputs = tf.reshape(self.atom_outputs, (-1, )) # (batch_size,)
         # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
     # def atom_outputs(self):

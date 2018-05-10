@@ -218,9 +218,8 @@ REGISTER_OP("FeaturizeGrad")
     return Status::OK();
   });
 
-
-
-// REGISTER_KERNEL_BUILDER(Name("Ani").Device(DEVICE_CPU).HostMemory("acs"), AniReference);
-REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_GPU), AniCombined<GPUDevice>);
+#ifdef ANI_GPU
+  REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_GPU), AniCombined<GPUDevice>);
+#endif
 REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_CPU), AniCombined<CPUDevice>);
 REGISTER_KERNEL_BUILDER(Name("FeaturizeGrad").HostMemory("acs").Device(DEVICE_CPU), AniCombinedGrad<CPUDevice>);
