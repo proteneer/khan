@@ -7,10 +7,9 @@
     #define CONSTANT_FLAGS
 #endif
 
-const float CHARGE_CONSTANT = 0.529176917;
+const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, atoms, and atomic charges
 
-/* from github repo */
-
+/* from github repo (ani_small) */
 /*
 const int MAX_ATOM_TYPES = 4;
 
@@ -73,8 +72,8 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
 
 
 
-// even smaller featurization, 12 instead of 16
-
+// even smaller featurization, 12 instead of 16 (ani_smaller)
+/*
 const int MAX_ATOM_TYPES = 4;
 
 const int NUM_R_Rs = 12; // reduced from 16
@@ -123,6 +122,7 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
     1.8000000e+00,
     2.4500000e+00,
 };
+*/
 
 
 
@@ -135,9 +135,6 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
 
 /* from ANI-1 paper */
 
-
-
-/*
 const int MAX_ATOM_TYPES = 4;
 
 const int NUM_R_Rs = 32;
@@ -156,7 +153,7 @@ const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MA
 
 const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
-portably transfer over to CPU code?
+// portably transfer over to CPU code?
 CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
     0.12,
     0.24,
@@ -213,7 +210,7 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
     2.41111111,
     2.75555556
 };
-*/
+
 
 
 

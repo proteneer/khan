@@ -43,6 +43,7 @@ def main():
         parser.add_argument('--max_local_epoch_count', default='50', help="How many epochs to try each learning rate before reducing it")
         parser.add_argument('--dataset_index', default='0', help="Index of training set to use")
         parser.add_argument('--testset_index', default='0', help="Index of test set to use")
+        parser.add_argument('--fit_charges', default=False, action='store_true', help="Whether or not to add fitted charge energies")
 
         parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
         parser.add_argument('--train-dir', default='/home/yzhao/ANI-1_release', help="location where work data is dumped")
@@ -133,7 +134,10 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=layer_sizes)
+            layer_sizes=layer_sizes,
+            fit_charges=args.fit_charges,
+            charge_layer_sizes=(64, 32, 8, 1)
+            )
 
         print("------------Load training data--------------")
         
