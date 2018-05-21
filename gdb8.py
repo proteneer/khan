@@ -98,6 +98,9 @@ def main():
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         # Uncomment if you'd like gradients for a dataset
+        # for feat in trainer.featurize(rd_test):
+        #     print(feat.shape)
+
         # for grad in trainer.coordinate_gradients(rd_test):
         #     print(grad.shape)
 
@@ -112,12 +115,12 @@ def main():
                 # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
 
                 start_time = time.time()
-                train_results = trainer.feed_dataset(
+                train_results = list(trainer.feed_dataset(
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size,
-                    before_hooks=trainer.max_norm_ops)
+                    before_hooks=trainer.max_norm_ops))
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time

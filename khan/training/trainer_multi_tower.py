@@ -200,6 +200,7 @@ class TrainerMultiTower():
             self.tower_l2s = []
             self.tower_mos = []
             self.tower_coord_grads = []
+            self.tower_features = []
             self.all_models = []
             self.tower_exp_loss = []
 
@@ -239,6 +240,11 @@ class TrainerMultiTower():
                                 f1 = tf.reshape(f1, (-1, feat_size))
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
+
+                            self.tower_features.append(tf.gather(
+                                tf.concat([f0, f1, f2, f3], axis=0),
+                                gather_idxs
+                            ))
 
                             tower_model_near = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
@@ -424,23 +430,55 @@ class TrainerMultiTower():
         """
         results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_coord_grads, self.tower_mos, self.tower_bids], batch_size=batch_size)
 
-        ordered_grads = []
-        ordered_mos = []
+        for (grad, mo, tids) in results:
+            bidxs = np.argsort(tids)
+            sorted_grads = np.take(grad, bidxs, axis=0)
+            sorted_mos = np.take(mo, bidxs, axis=0)
 
-        for (grad, mo, ids) in results:
-            idxs =  np.argsort(ids)
-            sorted_grads = np.take(grad, idxs, axis=0)
-            sorted_mos = np.take(mo, idxs, axis=0)
-            ordered_grads.extend(sorted_grads)
-            ordered_mos.extend(sorted_mos)
+            for (mo, grad_all) in zip(sorted_mos, sorted_grads):
 
-        all_grads = []
+                grad_x, grad_y, grad_z = grad_all
+                grad_xs = np.split(grad_x, mo)
+                grad_ys = np.split(grad_y, mo)
+                grad_zs = np.split(grad_z, mo)
 
-        for batch_g, batch_m in zip(ordered_grads, ordered_mos):
-            res = np.split(np.vstack(batch_g).reshape(-1, 3), batch_m)
-            all_grads.extend(res)
+                for x,y,z in zip(grad_xs, grad_ys, grad_zs):
+                    grad_xyz = np.vstack([x,y,z]).transpose()
+                    yield grad_xyz
 
-        return all_grads
+
+    def featurize(self, dataset, batch_size=1024):
+        """
+        Featurize a given dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset used for featurization.
+
+        batch_size: int (optional)
+            Size of each batch.
+
+        Returns
+        -------
+        list of np.ndarray
+            Returns a list of numpy array corresponding to the features
+            of each molecule in the dataset.
+
+        """
+
+        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_features, self.tower_mos, self.tower_bids], batch_size=batch_size)
+
+        for (feats, mos, tids) in results:
+            bidxs = np.argsort(tids)
+            sorted_mos = np.take(mos, bidxs, axis=0)
+            sorted_feats = np.take(feats, bidxs, axis=0)
+
+            for (mo, feat) in zip(sorted_mos, sorted_feats):
+                feats = np.split(feat, mo)
+                for f in feats:
+                    yield f
+
 
     def predict(self, dataset, batch_size=1024):
         """
@@ -498,6 +536,15 @@ class TrainerMultiTower():
             List of tensorflow ops which we run before every batch. Note that currently
             these ops must have no feed_dict dependency.
 
+        Returns
+        -------
+        A generator that yields results of the specified op in increments of batch_size.
+
+        .. note:: You must ensure that resulting generator is fully iterated over to ensure
+        proper terminating of the submission threads. Furthermore, the resulting iterable
+        should be as non-blocking as possible, since flushing of the queue assumes that the
+        results are consumed asap.
+
         """
 
         def submitter():
@@ -537,7 +584,6 @@ class TrainerMultiTower():
                         self.bi_enq: b_idx
                     })
 
-
                     g_b_idx += 1
 
                 remainder = n_batches % self.num_towers
@@ -561,12 +607,7 @@ class TrainerMultiTower():
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)
 
-        results = []
         n_tower_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_towers)
 
         for i in range(n_tower_batches):
-            res = self.sess.run(target_ops)
-            results.append(res)
-
-        return results
-
+            yield self.sess.run(target_ops)
