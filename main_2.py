@@ -40,7 +40,7 @@ def main():
         parser.add_argument('--gpus', default='4', help="Number of GPUs to use")
         parser.add_argument('--cpus', default='1', help="Number of CPUs to use (GPUs override this if > 0)")
         parser.add_argument('--start_batch_size', default='64', help="How many training points to consider before calculating each gradient")
-        parser.add_argument('--max_local_epoch_count', default='50', help="How many epochs to try each learning rate before reducing it")
+        parser.add_argument('--max_local_epoch_count', default='10', help="How many epochs to try each learning rate before reducing it")
         parser.add_argument('--dataset_index', default='0', help="Index of training set to use")
         parser.add_argument('--testset_index', default='0', help="Index of test set to use")
         parser.add_argument('--fit_charges', default=False, action='store_true', help="Whether or not to add fitted charge energies")
@@ -125,8 +125,14 @@ def main():
 
         #layer_sizes=(128, 128, 64, 1), # original
         #layer_sizes=(128, 128, 64, 8, 1)
-        layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
+        #layer_sizes=(256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        #layer_sizes=(128, 128, 128, 128, 128, 128, 128, 128, 64, 8, 1)
         #layer_sizes=(64, 64, 64, 64, 8, 1)
+        #layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
+        #layer_sizes=(256, 64, 64, 64, 32, 16, 8, 1)
+        #layer_sizes=(512, 256, 256, 256, 128, 64, 8, 1)
+        #layer_sizes=(1024, 64, 64, 64, 32, 16, 8, 1)
+        layer_sizes=(1,)
         print('layer_sizes:', layer_sizes)
         n_weights = sum( [layer_sizes[i]*layer_sizes[i+1] for i in range(len(layer_sizes)-1)] )
         print('n_weights:', n_weights)
@@ -135,8 +141,7 @@ def main():
             sess,
             towers=towers,
             layer_sizes=layer_sizes,
-            fit_charges=args.fit_charges,
-            charge_layer_sizes=(64, 32, 8, 1)
+            fit_charges=args.fit_charges
             )
 
         print("------------Load training data--------------")
@@ -154,7 +159,7 @@ def main():
 
         print("------------Initializing model--------------")
 
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.3) # stratify by UTT would be good to try here
+        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.5) # stratify by UTT would be good to try here
         rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
         print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
 
@@ -162,23 +167,50 @@ def main():
             print("Restoring existing model from", save_dir)
             trainer.load(save_dir)
             trainer.load_best_params()
-        else: # initialize new random weights. If weights give crazy energies that might break convergence, just try again. 
-            acceptable_start_rmse = 500.0
-            for attempt_count in range(1):
+        else: # initialize new random weights. Pick the best of a few tries. 
+            best_seed = 0
+            best_error = 1e10
+            for attempt_count in range(0):
+                tf.set_random_seed(attempt_count)
                 trainer.initialize() # initialize to random variables
                 test_err = trainer.eval_abs_rmse(rd_test)
-                print('Initial error from random weights: %.1f kcal/mol, acceptable limit: %.1f' % (test_err, acceptable_start_rmse) )
-                for wm in trainer._weight_matrices():
-                    data = sess.run(wm)
-                    print( wm.name, 'max', np.max(data), 'min', np.min(data) )
-                if test_err < acceptable_start_rmse:
-                    break
+                print('Initial error from random weights: %.1f kcal/mol' % test_err )
+                #for wm in trainer._weight_matrices():
+                #    data = sess.run(wm)
+                #    print( wm.name, 'max', np.max(data), 'min', np.min(data) )
+                if test_err < best_error:
+                    best_seed = attempt_count
+                    best_error = test_err
+            tf.set_random_seed(best_seed)
+            trainer.initialize()
+
+        # save/load functionality
+
+        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
+
+        if False: # save these weights as numpy arrays in a file
+            print('Saving weight and bias values')
+            values = [sess.run(wm) for wm in trainer._weight_matrices()] + [sess.run(wm) for wm in trainer._biases()]
+            with open('saved.npy', 'wb') as outfile:
+                np.save(outfile, values)
+        if False: # load other weights from a file
+            print('Loading weight and bias values')
+            with open('saved.npy', 'rb') as infile:
+                load_values = np.load(infile)
+            Ws = [W for ann in trainer.all_models[0].anns[:4] for W in ann.Ws]
+            bs = [b for ann in trainer.all_models[0].anns[:4] for b in ann.bs]
+            load_targets = Ws + bs
+            #load_targets = trainer._weight_matrices()[:len(layer_sizes)] + trainer._biases()[:len(layer_sizes)] # only load main layer, not charge layer
+            for wm,values in zip( load_targets, load_values ):
+                sess.run( wm.assign( tf.convert_to_tensor(values, dtype=tf.float32) ) )
+                max1, max2 = np.max(values), np.max(sess.run(wm))
+                print(max1, max2)
 
         print("Evaluating Rotamer Errors:")
 
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
-        
+            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))    
 
         print("------------Starting Training--------------")
 
@@ -191,18 +223,18 @@ def main():
         ]
         start_time = time.time()
         best_test_score = trainer.eval_abs_rmse(rd_test)
-        while sess.run(trainer.learning_rate) > 1e-7:
+        while batch_size < 1e4: # bigger batches as fitting goes on, makes updates less exploratory
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
-                for step in range(1): # how many rounds to perform before checking test rmse
+                for step in range(2): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
                     train_step_time = time.time()
                     train_results = trainer.feed_dataset(
                         rd_train,
                         shuffle=True,
-                        target_ops=train_ops, # note: evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time
+                        target_ops=train_ops,
                         batch_size=batch_size,
                         before_hooks=trainer.max_norm_ops)
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                    #print('train_abs_rmse: %f, %.2fs' % (train_abs_rmse, time.time()-train_step_time) )
+                    print('Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
@@ -224,6 +256,10 @@ def main():
 
                     best_test_score = test_abs_rmse
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
+                    if True:
+                        # reshuffle train and test
+                        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.5)
+                        rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
@@ -231,13 +267,16 @@ def main():
                 trainer.save(save_dir)
                 
 
-            print("==========Decreasing learning rate==========")
-            sess.run(trainer.decr_learning_rate)
+            #print("==========Decreasing learning rate==========")
+            #sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
-            if batch_size < 2*15: # bigger batches as fitting goes on, cap at 2^16
-                batch_size *= 2
-                max_local_epoch_count *= 2
+            batch_size *= 2
+            max_local_epoch_count *= 2
             trainer.load_best_params()
+            if False:
+                # reshuffle train and test
+                X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, test_size=0.5)
+                rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
     return
 

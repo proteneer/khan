@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.framework import ops
+from tensorflow.contrib.opt import NadamOptimizer
 
 import khan
 from khan.utils.helpers import ed_harder_rmse
@@ -128,6 +129,7 @@ class TrainerMultiTower():
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
         fit_charges=False,
+        charge_layer_sizes=(64, 64, 8, 1)
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -174,13 +176,14 @@ class TrainerMultiTower():
         self.sess = sess
 
         with tf.device('/cpu:0'):
-
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False)
-            self.optimizer = tf.train.AdamOptimizer(
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-4), trainable=False)
+            self.optimizer = NadamOptimizer( # tf.train.AdamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
                     epsilon=1e-8) # default is 1e-8
+            #self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
+            #self.optimizer = PowerSignOptimizer(learning_rate=self.learning_rate)
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.5))
@@ -251,7 +254,7 @@ class TrainerMultiTower():
                                     type_map=["H", "C", "N", "O"],
                                     atom_type_features=[f0, f1, f2, f3],
                                     gather_idxs=gather_idxs,
-                                    layer_sizes=(feat_size,) + layer_sizes,
+                                    layer_sizes=(feat_size,) + charge_layer_sizes,
                                     prefix="charge_")
 
                                 self.all_models.append(tower_model_charges)

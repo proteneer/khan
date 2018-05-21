@@ -38,6 +38,9 @@ class AtomNN():
             print('Layer', idx, 'input/output size', x, y)
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
+            with open('saved.npy', 'rb') as infile:
+                load_values = np.load(infile)
+
             with tf.device('/cpu:0'):
                 W = tf.get_variable(
                     prefix+"W"+name,
@@ -45,8 +48,9 @@ class AtomNN():
                     np.float32,
                     #tf.random_uniform_initializer(minval=-0.1, maxval=0.1),
                     #tf.random_normal_initializer(stddev=0.1),
-                    # tf.random_normal_initializer(mean=0, stddev=1.0/x),
-                    tf.random_normal_initializer(mean=0, stddev=0.1),
+                    tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5),
+                    #tf.truncated_normal_initializer(mean=0, stddev=(1.0/x)**0.5 * (0.1 if idx==(len(layer_sizes)-1) else 1.0) ), # for use with SELU
+                    #tf.random_normal_initializer(mean=0, stddev=0.1), # for use with certain RELU
                     trainable=True
                 )
                 b = tf.get_variable(
@@ -62,6 +66,7 @@ class AtomNN():
             #W = tf.clip_by_norm(W, 1.0, axes=1)
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
+                #A = tf.nn.selu(A) # "self-normalizing exponential" activation
                 A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
                 #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
                 #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
