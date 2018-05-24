@@ -98,11 +98,15 @@ def main():
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         # Uncomment if you'd like gradients for a dataset
-        # for feat in trainer.featurize(rd_test):
-        #     print(feat.shape)
+        all_shapes = []
+        for feat in trainer.featurize(rd_test):
+            all_shapes.append(feat)
+        assert len(all_shapes) == rd_test.num_mols()
 
-        # for grad in trainer.coordinate_gradients(rd_test):
-        #     print(grad.shape)
+        all_grads = []
+        for grad in trainer.coordinate_gradients(rd_test):
+            all_grads.append(grad)
+        assert len(all_grads) == rd_test.num_mols()
 
         print("------------Starting Training--------------")
 
