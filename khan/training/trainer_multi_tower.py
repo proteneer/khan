@@ -434,12 +434,12 @@ class TrainerMultiTower():
             sorted_mos = np.take(mo, bidxs, axis=0)
 
             for (mo, grad_all) in zip(sorted_mos, sorted_grads):
-
+                # mo is an exclusive prefix sum so the first element is zero
+                mo = mo[1:]
                 grad_x, grad_y, grad_z = grad_all
                 grad_xs = np.split(grad_x, mo)
                 grad_ys = np.split(grad_y, mo)
                 grad_zs = np.split(grad_z, mo)
-
                 for x,y,z in zip(grad_xs, grad_ys, grad_zs):
                     grad_xyz = np.vstack([x,y,z]).transpose()
                     yield grad_xyz
@@ -473,6 +473,8 @@ class TrainerMultiTower():
             sorted_feats = np.take(feats, bidxs, axis=0)
 
             for (mo, feat) in zip(sorted_mos, sorted_feats):
+                # mo is an exclusive prefix sum so the first element is zero
+                mo = mo[1:]
                 feats = np.split(feat, mo)
                 for f in feats:
                     yield f
