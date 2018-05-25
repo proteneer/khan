@@ -334,7 +334,7 @@ def read_all_reactions(reactivity_dir):
 
     Returns two dicts for the "small" and "big" examples defined
     by MAX_ATOM_LIMIT. The keys are filenames and values are lists of
-    examples.
+    examples.  Example is a tuple (X, Y) for that reaction
     """
 
     skipped = 0
