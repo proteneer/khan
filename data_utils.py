@@ -396,7 +396,6 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
         Xbigtest.extend(A)
         Ybigtest.extend(B)
 
-    
     return Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest
 
 def _read_reactivity_data(fname):
