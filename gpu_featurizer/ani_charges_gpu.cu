@@ -80,43 +80,48 @@ __global__ void charge_nrg(
   float *batch_energies) {
 
   int mol_idx = blockIdx.x;
-  int local_atom_idx = threadIdx.x; // local_local_atom_idx
   int num_atoms = mol_atom_count[blockIdx.x];
+  int block_size = blockDim.x;
+  int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
 
-  if (local_atom_idx >= num_atoms) {
-      return;
+  float local_energy = 0; // contribution to the total energy of the molecule
+  // by atoms local_atom_idx, 1*block_size + threadIdx.x, 2*block_size + threadIdx.x, etc.
+  for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
+
+    int local_atom_idx = warp_idx*block_size + threadIdx.x; // local_local_atom_idx
+
+    if (local_atom_idx >= num_atoms) {
+        return;
+    }
+
+    int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
+    int i = local_atom_idx;
+
+    float i_x = xs[g_atom_idx_i];
+    float i_y = ys[g_atom_idx_i];
+    float i_z = zs[g_atom_idx_i];
+    float i_q = qs[g_atom_idx_i];
+
+    for(size_t j=i+1; j < num_atoms; j++) {
+
+      int g_atom_idx_j = mol_offsets[mol_idx]+j;
+
+      // can replace with shuffle later since other
+      // warps have these registers
+      float j_x = xs[g_atom_idx_j];
+      float j_y = ys[g_atom_idx_j];
+      float j_z = zs[g_atom_idx_j];
+      float j_q = qs[g_atom_idx_j];
+
+      float dx = i_x - j_x;
+      float dy = i_y - j_y;
+      float dz = i_z - j_z;
+
+      float r = dist_diff(dx, dy, dz);
+
+      local_energy += CHARGE_CONSTANT*i_q*j_q*(1-f_C(r, R_Rc))/r;
+    }
   }
-
-  int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
-  int i = local_atom_idx;
-
-  float local_energy = 0;
-
-  float i_x = xs[g_atom_idx_i];
-  float i_y = ys[g_atom_idx_i];
-  float i_z = zs[g_atom_idx_i];
-  float i_q = qs[g_atom_idx_i];
-
-  for(size_t j=i+1; j < num_atoms; j++) {
-
-    int g_atom_idx_j = mol_offsets[mol_idx]+j;
-
-    // can replace with shuffle later since other
-    // warps have these registers
-    float j_x = xs[g_atom_idx_j];
-    float j_y = ys[g_atom_idx_j];
-    float j_z = zs[g_atom_idx_j];
-    float j_q = qs[g_atom_idx_j];
-
-    float dx = i_x - j_x;
-    float dy = i_y - j_y;
-    float dz = i_z - j_z;
-
-    float r = dist_diff(dx, dy, dz);
-
-    local_energy += CHARGE_CONSTANT*i_q*j_q*(1-f_C(r, R_Rc))/r;
-  }
-  
   // reduce with a shuffle later
   // writing to globals but still at least using hw as opposed to replay in sw
   atomicAdd(batch_energies + mol_idx, local_energy);
@@ -203,51 +208,55 @@ __global__ void charge_grads(
   float *batch_grads) {
 
   int mol_idx = blockIdx.x;
-  int local_atom_idx = threadIdx.x; // local_local_atom_idx
+
   int num_atoms = mol_atom_count[blockIdx.x];
+  int block_size = blockDim.x;
+  int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
 
-  if (local_atom_idx >= num_atoms) {
-      return;
+  for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
+    int local_atom_idx = warp_idx*block_size + threadIdx.x; // local_local_atom_idx
+
+    if (local_atom_idx >= num_atoms) {
+        return;
+    }
+
+    int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
+    int i = local_atom_idx;
+
+    float local_grad_i = 0;
+
+    float i_x = xs[g_atom_idx_i];
+    float i_y = ys[g_atom_idx_i];
+    float i_z = zs[g_atom_idx_i];
+    float i_q = qs[g_atom_idx_i];
+
+    float nrg_grad = energy_grads[mol_idx];
+
+    for(size_t j=i+1; j < num_atoms; j++) {
+
+      int g_atom_idx_j = mol_offsets[mol_idx]+j;
+
+      // can replace with shuffle later since other
+      // warps have these registers
+      float j_x = xs[g_atom_idx_j];
+      float j_y = ys[g_atom_idx_j];
+      float j_z = zs[g_atom_idx_j];
+      float j_q = qs[g_atom_idx_j];
+
+      float dx = i_x - j_x;
+      float dy = i_y - j_y;
+      float dz = i_z - j_z;
+      float r = dist_diff(dx, dy, dz);
+      local_grad_i += nrg_grad*CHARGE_CONSTANT*j_q*(1-f_C(r, R_Rc))/r;
+      // replace with shuffle later
+      atomicAdd(batch_grads + g_atom_idx_j, nrg_grad*CHARGE_CONSTANT*i_q*(1-f_C(r, R_Rc))/r);
+    }
+
+    // reduce with a shuffle later
+    // writing to globals but still at least using hw as opposed to replay in sw
+    atomicAdd(batch_grads + g_atom_idx_i, local_grad_i);
+
   }
-
-  int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
-  int i = local_atom_idx;
-
-  float local_grad_i = 0;
-
-  float i_x = xs[g_atom_idx_i];
-  float i_y = ys[g_atom_idx_i];
-  float i_z = zs[g_atom_idx_i];
-  float i_q = qs[g_atom_idx_i];
-
-  float nrg_grad = energy_grads[mol_idx];
-
-  for(size_t j=i+1; j < num_atoms; j++) {
-
-    int g_atom_idx_j = mol_offsets[mol_idx]+j;
-
-    // can replace with shuffle later since other
-    // warps have these registers
-    float j_x = xs[g_atom_idx_j];
-    float j_y = ys[g_atom_idx_j];
-    float j_z = zs[g_atom_idx_j];
-    float j_q = qs[g_atom_idx_j];
-
-    float dx = i_x - j_x;
-    float dy = i_y - j_y;
-    float dz = i_z - j_z;
-
-    float r = dist_diff(dx, dy, dz);
-
-    local_grad_i += nrg_grad*CHARGE_CONSTANT*j_q*(1-f_C(r, R_Rc))/r;
-
-    // replace with shuffle later
-    atomicAdd(batch_grads + g_atom_idx_j, nrg_grad*CHARGE_CONSTANT*i_q*(1-f_C(r, R_Rc))/r);
-  }
-  
-  // reduce with a shuffle later
-  // writing to globals but still at least using hw as opposed to replay in sw
-  atomicAdd(batch_grads + g_atom_idx_i, local_grad_i);
 }
 
 /*

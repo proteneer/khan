@@ -68,7 +68,6 @@ __global__ void scatter(
     }
 }
 
-
 // Remind yutong to document what these pointers are.
 __global__ void featurize(
     const float *Xs,
@@ -87,180 +86,185 @@ __global__ void featurize(
     float *X_feat_out_N,
     float *X_feat_out_O) {
 
-
     int mol_idx = blockIdx.x;
-    int local_atom_idx = threadIdx.x; // local_local_atom_idx
     int num_atoms = mol_atom_count[blockIdx.x];
+    int block_size = blockDim.x;
+    int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
 
-    if (local_atom_idx >= num_atoms) {
-        return;
-    }
+    for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
 
-    // todo: cache into shared mem
-    // load all the x y z coordinates
-    int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
+        int local_atom_idx = warp_idx*block_size + threadIdx.x; // local_local_atom_idx
 
-    int g_atomic_num_i = atomic_nums[g_atom_idx_i];
+        if (local_atom_idx >= num_atoms) {
+            return;
+        }
 
-    float i_x = Xs[g_atom_idx_i];
-    float i_y = Ys[g_atom_idx_i];
-    float i_z = Zs[g_atom_idx_i];
+        // todo: cache into shared mem
+        // load all the x y z coordinates
+        int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
 
+        int g_atomic_num_i = atomic_nums[g_atom_idx_i];
 
-    // printf("%d %d %d (%f, %f, %f)\n", mol_idx, local_atom_idx, num_atoms, i_x, i_y, i_z);
-
-    // float *X_feat_i = X_feat_out + scatter_idxs[g_atom_idx_i];
-
-    // if(Atom)
-
-    float *X_feat_out_i;
-    if(g_atomic_num_i == 0) {
-        X_feat_out_i = X_feat_out_H;
-    } else if(g_atomic_num_i == 1) {
-        X_feat_out_i = X_feat_out_C;
-    } else if(g_atomic_num_i == 2) {
-        X_feat_out_i = X_feat_out_N;
-    } else {
-        X_feat_out_i = X_feat_out_O;
-    }
-  
-    float *radial_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + 0;
-    float *angular_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
-
-    for(int j=0; j < num_atoms; j++) {
-
-        int g_atom_idx_j = mol_offsets[mol_idx]+j;
-        int g_atomic_num_j = atomic_nums[g_atom_idx_j];
+        float i_x = Xs[g_atom_idx_i];
+        float i_y = Ys[g_atom_idx_i];
+        float i_z = Zs[g_atom_idx_i];
 
 
-        float j_x = Xs[g_atom_idx_j];
-        float j_y = Ys[g_atom_idx_j];
-        float j_z = Zs[g_atom_idx_j];
+        // printf("%d %d %d (%f, %f, %f)\n", mol_idx, local_atom_idx, num_atoms, i_x, i_y, i_z);
 
-        float d_ij_x = i_x - j_x;
-        float d_ij_y = i_y - j_y;
-        float d_ij_z = i_z - j_z;
+        // float *X_feat_i = X_feat_out + scatter_idxs[g_atom_idx_i];
 
-        // printf("(%f, %f, %f)\n", d_ij_x, d_ij_y, d_ij_z);
+        // if(Atom)
 
-        float r_ij = dist_diff(d_ij_x, d_ij_y, d_ij_z);
-
-        // float *X_feat_j = X_feat_out + scatter_idxs[g_atom_idx_j];
-
-        float *X_feat_out_j;
-        if(g_atomic_num_j == 0) {
-            X_feat_out_j = X_feat_out_H;
-        } else if(g_atomic_num_j == 1) {
-            X_feat_out_j = X_feat_out_C;
-        } else if(g_atomic_num_j == 2) {
-            X_feat_out_j = X_feat_out_N;
+        float *X_feat_out_i;
+        if(g_atomic_num_i == 0) {
+            X_feat_out_i = X_feat_out_H;
+        } else if(g_atomic_num_i == 1) {
+            X_feat_out_i = X_feat_out_C;
+        } else if(g_atomic_num_i == 2) {
+            X_feat_out_i = X_feat_out_N;
         } else {
-            X_feat_out_j = X_feat_out_O;
+            X_feat_out_i = X_feat_out_O;
         }
+      
+        float *radial_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + 0;
+        float *angular_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
 
-        float *radial_feature_buffer_j = X_feat_out_j + scatter_idxs[g_atom_idx_j]*TOTAL_FEATURE_SIZE + 0;
-        // float *radial_feature_buffer_j = X_feat_j + g_atom_idx_j*TOTAL_FEATURE_SIZE + 0;
-        // float *angular_feature_buffer_j = X_feat_out + g_atom_idx_j*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
+        for(int j=0; j < num_atoms; j++) {
 
+            int g_atom_idx_j = mol_offsets[mol_idx]+j;
+            int g_atomic_num_j = atomic_nums[g_atom_idx_j];
 
-        // if(g_atom_idx_i == 0) {
-            // printf("gpu j %d %f\n", j, r_ij);
-            // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);                    
-            // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);                    
-        // }
+            float j_x = Xs[g_atom_idx_j];
+            float j_y = Ys[g_atom_idx_j];
+            float j_z = Zs[g_atom_idx_j];
 
-        // radial features
-        if(r_ij < R_Rc && local_atom_idx < j) {
-            for(int r_idx = 0; r_idx < NUM_R_Rs; r_idx++) {
-                float summand = expf(-R_eta * powf(r_ij - R_Rs[r_idx], 2.0)) * f_C(r_ij, R_Rc);
+            float d_ij_x = i_x - j_x;
+            float d_ij_y = i_y - j_y;
+            float d_ij_z = i_z - j_z;
 
-                // exploit symmetry of the atomic adds
-                auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
-                auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
-            
-                //if(isnan(res1) || isinf(res1)) {
-                //    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
-                    // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
-                        // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                //}
+            // printf("(%f, %f, %f)\n", d_ij_x, d_ij_y, d_ij_z);
 
-                //if(isnan(res2) || isinf(res2)) {
-                //    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
-                    // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
-                        // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                //}
+            float r_ij = dist_diff(d_ij_x, d_ij_y, d_ij_z);
 
+            // float *X_feat_j = X_feat_out + scatter_idxs[g_atom_idx_j];
+
+            float *X_feat_out_j;
+            if(g_atomic_num_j == 0) {
+                X_feat_out_j = X_feat_out_H;
+            } else if(g_atomic_num_j == 1) {
+                X_feat_out_j = X_feat_out_C;
+            } else if(g_atomic_num_j == 2) {
+                X_feat_out_j = X_feat_out_N;
+            } else {
+                X_feat_out_j = X_feat_out_O;
             }
-        }
 
-        float A_f_C_ij = f_C(r_ij, A_Rc);
+            float *radial_feature_buffer_j = X_feat_out_j + scatter_idxs[g_atom_idx_j]*TOTAL_FEATURE_SIZE + 0;
+            // float *radial_feature_buffer_j = X_feat_j + g_atom_idx_j*TOTAL_FEATURE_SIZE + 0;
+            // float *angular_feature_buffer_j = X_feat_out + g_atom_idx_j*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
 
 
-        if(r_ij < A_Rc) {
+            // if(g_atom_idx_i == 0) {
+                // printf("gpu j %d %f\n", j, r_ij);
+                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);
+                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);
+            // }
 
-            for(size_t k=j+1; k < num_atoms; k++) {
+            // radial features
+            if(r_ij < R_Rc && local_atom_idx < j) {
+                for(int r_idx = 0; r_idx < NUM_R_Rs; r_idx++) {
+                    float summand = expf(-R_eta * powf(r_ij - R_Rs[r_idx], 2.0)) * f_C(r_ij, R_Rc);
 
-                if(local_atom_idx == j || local_atom_idx == k || j == k) {
-                    continue;
+                    // exploit symmetry of the atomic adds
+                    auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
+                    auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
+
+                    //if(isnan(res1) || isinf(res1)) {
+                    //    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
+                        // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                            // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                    //}
+
+                    //if(isnan(res2) || isinf(res2)) {
+                    //    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
+                        // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                            // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                    //}
+
                 }
+            }
 
-                // const int an_i = atomic_nums[local_atom_idx];
+            float A_f_C_ij = f_C(r_ij, A_Rc);
 
 
-                int g_atom_idx_k = mol_offsets[mol_idx]+k;
+            if(r_ij < A_Rc) {
 
-                const int an_j = atomic_nums[g_atom_idx_j];
-                const int an_k = atomic_nums[g_atom_idx_k];
+                for(size_t k=j+1; k < num_atoms; k++) {
 
-                float k_x = Xs[g_atom_idx_k];
-                float k_y = Ys[g_atom_idx_k];
-                float k_z = Zs[g_atom_idx_k];
-
-                float d_ik_x = i_x - k_x;
-                float d_ik_y = i_y - k_y;
-                float d_ik_z = i_z - k_z;
-
-                float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
-
-                if(r_ik < A_Rc) {
-
-                    // TODO(YTZ): replace with arctan2 trick
-
-                    float inner = (d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik);
-                    inner = fmaxf(inner, -1.0);
-                    inner = fminf(inner,  1.0);
-
-                    // printf("INNER %f\n", inner);
-
-                    float theta_ijk = acosf(inner);
-
-                    // super useful debug
-                    if(isnan(theta_ijk) || isinf(theta_ijk)) {
-                        printf("WTF NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
-                            g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                    if(local_atom_idx == j || local_atom_idx == k || j == k) {
+                        continue;
                     }
 
-                    // printf("gpu tijk %d %d %d %f\n", local_atom_idx, j, k, theta_ijk);
-                    float A_f_C_ik = f_C(r_ik, A_Rc);
-                    for(int t=0; t < NUM_A_THETAS; t++) {
-                        for(int s=0; s < NUM_A_RS; s++) {
-                            // (TODO: ytz) do 2*(1-A_Zeta) at the end
-                            float summand = powf(2, 1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
-                            // printf("summand: %f, \n", summand);
-                            // printf("scatter_idxs[g_atom_idx_i]: %d, linearize: %d\n", scatter_idxs[g_atom_idx_i], linearize(an_j, an_k, t, s));
-                            // printf("i,j,k,t,s %d %d %d %d %d %d\n", g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, at_idx, ar_idx, linearize(j_type, k_type, at_idx, ar_idx))
-                            auto res = atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s), summand);
+                    // const int an_i = atomic_nums[local_atom_idx];
 
-                            // if(isnan(res) || isinf(res)) {
-                            //     printf("WTF ANGULAR SUMMAND NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
-                            //         g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                            // }
+
+                    int g_atom_idx_k = mol_offsets[mol_idx]+k;
+
+                    const int an_j = atomic_nums[g_atom_idx_j];
+                    const int an_k = atomic_nums[g_atom_idx_k];
+
+                    float k_x = Xs[g_atom_idx_k];
+                    float k_y = Ys[g_atom_idx_k];
+                    float k_z = Zs[g_atom_idx_k];
+
+                    float d_ik_x = i_x - k_x;
+                    float d_ik_y = i_y - k_y;
+                    float d_ik_z = i_z - k_z;
+
+                    float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
+
+                    if(r_ik < A_Rc) {
+
+                        // TODO(YTZ): replace with arctan2 trick
+
+                        float inner = (d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z) / (r_ij * r_ik);
+                        inner = fmaxf(inner, -1.0);
+                        inner = fminf(inner,  1.0);
+
+                        // printf("INNER %f\n", inner);
+
+                        float theta_ijk = acosf(inner);
+
+                        // super useful debug
+                        if(isnan(theta_ijk) || isinf(theta_ijk)) {
+                            printf("WTF NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                                g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
                         }
-                    }     
+
+                        // printf("gpu tijk %d %d %d %f\n", local_atom_idx, j, k, theta_ijk);
+                        float A_f_C_ik = f_C(r_ik, A_Rc);
+                        for(int t=0; t < NUM_A_THETAS; t++) {
+                            for(int s=0; s < NUM_A_RS; s++) {
+                                // (TODO: ytz) do 2*(1-A_Zeta) at the end
+                                float summand = powf(2, 1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
+                                // printf("summand: %f, \n", summand);
+                                // printf("scatter_idxs[g_atom_idx_i]: %d, linearize: %d\n", scatter_idxs[g_atom_idx_i], linearize(an_j, an_k, t, s));
+                                // printf("i,j,k,t,s %d %d %d %d %d %d\n", g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, at_idx, ar_idx, linearize(j_type, k_type, at_idx, ar_idx))
+                                auto res = atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s), summand);
+
+                                // if(isnan(res) || isinf(res)) {
+                                //     printf("WTF ANGULAR SUMMAND NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
+                                //         g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
+                                // }
+                            }
+                        }
+                    }
                 }
-            }
-        }
-    }
+            } // end radial
+        } // end current warp
+    } // end all warps
+
 }
 
 
