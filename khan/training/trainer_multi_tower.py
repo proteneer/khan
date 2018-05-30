@@ -216,7 +216,6 @@ class TrainerMultiTower():
 
             # parameters within a tower are shared.
             with tf.variable_scope(tf.get_variable_scope()):
-                # for gpu_idx in range(self.num_gpus):
                 for tower_idx, tower_device in enumerate(towers):
                     with tf.device(tower_device):
                         with tf.name_scope("%s_%d" % ("tower", tower_idx)) as scope:
@@ -264,7 +263,9 @@ class TrainerMultiTower():
                                 layer_sizes=(feat_size,) + layer_sizes,
                                 prefix="near_")
 
-                            self.parameters.extend(tower_model_near.get_parameters())
+                            # avoid duplicate parameters from later towers since the variables are shared.
+                            if tower_idx == 0:
+                                self.parameters.extend(tower_model_near.get_parameters())
 
                             self.all_models.append(tower_model_near)
                             tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
@@ -277,7 +278,8 @@ class TrainerMultiTower():
                                     layer_sizes=(feat_size,) + layer_sizes,
                                     prefix="charge_")
 
-                                self.parameters.extend(tower_model_charges.get_parameters())
+                                if tower_idx == 0:
+                                    self.parameters.extend(tower_model_charges.get_parameters())
 
                                 self.all_models.append(tower_model_charges)
                                 tower_charges = tower_model_charges.atom_outputs

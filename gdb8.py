@@ -85,7 +85,7 @@ def main():
         else:
             trainer.initialize() # initialize to random variables
 
-        max_local_epoch_count = 100
+        max_local_epoch_count = 10
 
         train_ops = [
             trainer.global_epoch_count,
