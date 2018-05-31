@@ -65,6 +65,9 @@ class AtomNN():
             self.bs.append(b)
             self.As.append(A)
 
+    def get_parameters(self):
+        return self.Ws + self.bs
+
     def atom_energies(self):
         """
         Generate one layer in the atomic differentiated dense structure.
@@ -165,8 +168,11 @@ class MoleculeNN():
         self.atom_outputs = tf.reshape(self.atom_outputs, (-1, )) # (batch_size,)
         # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
-    # def atom_outputs(self):
-        # return self.atom_outputs
+    def get_parameters(self):
+        all_params = []
+        for a in self.anns:
+            all_params.extend(a.get_parameters())
+        return all_params
 
     def predict_op(self):
         """

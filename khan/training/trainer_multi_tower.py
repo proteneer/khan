@@ -102,11 +102,15 @@ def average_gradients(tower_grads):
     for grad_and_vars in zip(*tower_grads):
         grads = []
         for g, _ in grad_and_vars:
-
+            if g is None:
+                continue
             # Add 0 dimension to the gradients to represent the tower.
             expanded_g = tf.expand_dims(g, 0)
             # Append on a 'tower' dimension which we will average over below.
             grads.append(expanded_g)
+
+        if len(grads) == 0:
+            continue
 
         # Average over the 'tower' dimension.
         grad = tf.concat(grads, 0)
@@ -128,7 +132,7 @@ class TrainerMultiTower():
         sess,
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
-        fit_charges=False,
+        fit_charges=False
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -138,6 +142,13 @@ class TrainerMultiTower():
         ----------
         sess: tf.Session
             A tensorflow session under which we use
+
+        layer_Sizes: sequence of ints
+            Defines the shapes of the intermediate atomic nn layers
+
+        fit_charges: bool
+            Whether or not we fit partial charges
+
         """
         self.towers = towers
         self.num_towers = len(towers)
@@ -201,9 +212,10 @@ class TrainerMultiTower():
             self.tower_features = []
             self.all_models = []
             self.tower_exp_loss = []
+            self.parameters = []
 
+            # parameters within a tower are shared.
             with tf.variable_scope(tf.get_variable_scope()):
-                # for gpu_idx in range(self.num_gpus):
                 for tower_idx, tower_device in enumerate(towers):
                     with tf.device(tower_device):
                         with tf.name_scope("%s_%d" % ("tower", tower_idx)) as scope:
@@ -251,8 +263,13 @@ class TrainerMultiTower():
                                 layer_sizes=(feat_size,) + layer_sizes,
                                 prefix="near_")
 
+                            # avoid duplicate parameters from later towers since the variables are shared.
+                            if tower_idx == 0:
+                                self.parameters.extend(tower_model_near.get_parameters())
+
                             self.all_models.append(tower_model_near)
                             tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
+
                             if fit_charges:
                                 tower_model_charges = MoleculeNN(
                                     type_map=["H", "C", "N", "O"],
@@ -260,6 +277,9 @@ class TrainerMultiTower():
                                     gather_idxs=gather_idxs,
                                     layer_sizes=(feat_size,) + layer_sizes,
                                     prefix="charge_")
+
+                                if tower_idx == 0:
+                                    self.parameters.extend(tower_model_charges.get_parameters())
 
                                 self.all_models.append(tower_model_charges)
                                 tower_charges = tower_model_charges.atom_outputs
@@ -302,8 +322,9 @@ class TrainerMultiTower():
             self.save_best_params_ops = []
             self.load_best_params_ops = []
 
-            for var in tf.trainable_variables():
+            for var in self.parameters:
                 copy_name = "best_"+var.name.split(":")[0]
+
                 copy_shape = var.shape
                 copy_type = var.dtype
                 var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
