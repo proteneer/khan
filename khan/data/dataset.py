@@ -126,13 +126,6 @@ class RawDataset():
 
             for local_idx, p_idx in enumerate(perm[s_m_idx:e_m_idx]):
                 mol = self.all_Xs[p_idx]
-
-                # (ytz): do *not* remove this line. It's a super important sanity check since our
-                # GPU kernels do not support larger than 32 atoms.
-                if len(mol) > 32:
-                    print("FATAL: Molecules with more than 32 atoms are not supported.")
-                    assert 0
-
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
 
