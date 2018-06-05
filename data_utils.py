@@ -53,6 +53,13 @@ selfIxnNrgFitted = np.array([
 
 MAX_ATOM_LIMIT = 32
 
+def atomic_number_to_atom_id(atno):
+    """
+    Return an atom index (ANI atom type)  given an atomic number
+    atomic number must be convertable to an int
+    """
+    return {1: 0, 6: 1, 7: 2, 8: 3}[int(atno)]
+
 def convert_species_to_atomic_nums(s):
   PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
   res = []
