@@ -5,7 +5,7 @@ import tensorflow as tf
 
 class RawDataset():
 
-    def __init__(self, all_Xs, all_ys=None):
+    def __init__(self, all_Xs, all_ys=None, all_grads=None):
         """
         Construct a raw, unfeaturized dataset representing a collection of molecules and
         optionaly their corresponding y values.
@@ -20,6 +20,9 @@ class RawDataset():
         all_ys: np.array (optional)
             rank-1 numpy array representing the value of each molecule in the all_Xs array. This is
             not needed when doing inference.
+
+        all_grads: np.array(optional),
+            rank-3 numpy array representing the gradients of each coordinate.
 
         Example:
         -------
@@ -44,6 +47,24 @@ class RawDataset():
 
         ys = np.array([1.5, 3.3])
 
+        gs = [
+            np.array([
+                [1.0, 2.0, 3.0], # H grad
+                [2.0, 1.0, 4.0], # N grad
+                [0.5, 1.2, 2.3], # H grad
+                [0.3, 1.7, 3.2], # C grad
+                [0.6, 1.2, 1.1], # N grad
+                [14.0, 23.0, 15.0], # H grad
+                [2.0, 0.5, 0.3], # H grad
+                [2.3, 0.2, 0.4]  # H grad
+            ]), # mol0 forces
+            np.array([
+                [2.3, 0.2, 0.4], # H
+                [0.3, 1.7, 3.2], # C
+                [0.6, 1.2, 1.1], # N
+            ]), # mol1 forces
+        ]
+
         dataset = RawDataset(Xs, ys)
 
         for xs, m_ids, ys in dataset.iterate(2, batch_size=4, shuffle=True):
@@ -57,6 +78,9 @@ class RawDataset():
         """
         self.all_ys = all_ys
         self.all_Xs = all_Xs
+        self.all_grads = all_grads
+
+        # print("ALL_GRADS", self.all_grads)
 
     def num_mols(self):
         """
@@ -111,6 +135,8 @@ class RawDataset():
 
         """
 
+        # print("ITERATE", self.all_grads)
+
         perm = np.arange(len(self.all_Xs))
         if shuffle:
             np.random.shuffle(perm)
@@ -131,9 +157,19 @@ class RawDataset():
 
             mol_Xs = np.concatenate(mol_Xs, axis=0)
             mol_yts = None
+            mol_grads = None
 
             if self.all_ys is not None:
                 mol_yts = []
                 for p_idx in perm[s_m_idx:e_m_idx]:
                     mol_yts.append(self.all_ys[p_idx])
-            yield mol_Xs, mol_ids, mol_yts
+
+            if self.all_grads is not None:
+                mol_grads = []
+                # print("X")
+                for p_idx in perm[s_m_idx:e_m_idx]:
+                    # print("Y")
+                    mol_grads.append(self.all_grads[p_idx])                
+                mol_grads = np.concatenate(mol_grads, axis=0)
+
+            yield mol_Xs, mol_ids, mol_yts, mol_grads
