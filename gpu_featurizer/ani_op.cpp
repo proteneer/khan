@@ -218,8 +218,117 @@ REGISTER_OP("FeaturizeGrad")
     return Status::OK();
   });
 
+
+template<typename Device>
+class AniCombinedGradInverse : public OpKernel {
+
+ public:
+  explicit AniCombinedGradInverse(OpKernelConstruction* context) : OpKernel(context) {
+
+  }
+
+  void Compute(OpKernelContext* context) override {
+
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Grab the input tensors
+    const Tensor& input_Xs   = context->input(0);
+    const Tensor& input_Ys   = context->input(1);
+    const Tensor& input_Zs   = context->input(2);
+    const Tensor& input_As   = context->input(3);
+    const Tensor& input_MOs  = context->input(4);
+    const Tensor& input_MACs = context->input(5);
+    const Tensor& input_SIs  = context->input(6);
+    const Tensor& input_ACs  = context->input(7); // HOST
+
+
+    const Tensor& input_X_grads = context->input(8);
+    const Tensor& input_Y_grads = context->input(9);
+    const Tensor& input_Z_grads = context->input(10);
+
+    long long total_num_atoms = input_Xs.shape().num_elements();
+    long long n_mols = input_MOs.shape().num_elements();
+
+    Tensor* output_H_grads = nullptr;
+    Tensor* output_C_grads = nullptr;
+    Tensor* output_N_grads = nullptr;
+    Tensor* output_O_grads = nullptr;
+ 
+    const int *acs = input_ACs.flat<int>().data(); // safe since we declare this to be on the host.
+
+    OP_REQUIRES_OK(context, context->allocate_output(
+      "h_grads",
+      TensorShape({acs[0]*TOTAL_FEATURE_SIZE}),
+      &output_H_grads)
+    );
+
+    OP_REQUIRES_OK(context, context->allocate_output(
+      "c_grads",
+      TensorShape({acs[1]*TOTAL_FEATURE_SIZE}),
+      &output_C_grads)
+    );
+
+    OP_REQUIRES_OK(context, context->allocate_output(
+      "n_grads",
+      TensorShape({acs[2]*TOTAL_FEATURE_SIZE}),
+      &output_N_grads)
+    );
+
+    OP_REQUIRES_OK(context, context->allocate_output(
+      "o_grads",
+      TensorShape({acs[3]*TOTAL_FEATURE_SIZE}),
+      &output_O_grads)
+    );
+
+    AniGradInverse<Device>()(
+      context->eigen_device<Device>(), 
+      input_Xs.flat<float>().data(),
+      input_Ys.flat<float>().data(),
+      input_Zs.flat<float>().data(),
+      input_As.flat<int>().data(),
+      input_MOs.flat<int>().data(),
+      input_MACs.flat<int>().data(),
+      n_mols,
+      input_SIs.flat<int>().data(),
+      input_X_grads.flat<float>().data(),
+      input_Y_grads.flat<float>().data(),
+      input_Z_grads.flat<float>().data(),
+      output_H_grads->flat<float>().data(),
+      output_C_grads->flat<float>().data(),
+      output_N_grads->flat<float>().data(),
+      output_O_grads->flat<float>().data(),
+      acs
+    );
+  }
+};
+
+
+REGISTER_OP("FeaturizeGradInverse")
+  .Input("xs: float32")
+  .Input("ys: float32")
+  .Input("zs: float32")
+  .Input("as: int32")
+  .Input("mos: int32") // mol offsets
+  .Input("macs: int32") // mol atom counts
+  .Input("sis: int32") // scatter_idxs
+  .Input("acs: int32") // atom counts of size 4 (HOST MEMORY)
+  .Input("x_grads: float32")
+  .Input("y_grads: float32")
+  .Input("z_grads: float32")
+  .Output("h_grads: float32")
+  .Output("c_grads: float32")
+  .Output("n_grads: float32")
+  .Output("o_grads: float32")
+  .Attr("feature_size: int = "+std::to_string(TOTAL_FEATURE_SIZE))
+  .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+
+    return Status::OK();
+  });
+
 #ifdef ANI_GPU
   REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_GPU), AniCombined<GPUDevice>);
 #endif
 REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_CPU), AniCombined<CPUDevice>);
 REGISTER_KERNEL_BUILDER(Name("FeaturizeGrad").HostMemory("acs").Device(DEVICE_CPU), AniCombinedGrad<CPUDevice>);
+REGISTER_KERNEL_BUILDER(Name("FeaturizeGradInverse").HostMemory("acs").Device(DEVICE_CPU), AniCombinedGradInverse<CPUDevice>);

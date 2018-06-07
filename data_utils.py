@@ -306,3 +306,97 @@ def load_hdf5_files(
 
     return Xs, ys
 
+
+def load_hdf5_minima_gradients(
+    hdf5files,
+    calibration_map=None,
+    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL,
+    use_fitted=False):
+    """
+    Load the ANI dataset.
+
+    Parameters
+    ----------
+    hdf5files: list of str
+        List of paths to hdf5 files that will be used to generate the dataset. The data should be
+        in the format used by the ANI-1 dataset.
+
+    use_fitted: bool
+        If use_fitted is False, return the mo62x atomization energies. Otherwise, return a fitted energy.
+
+
+    Returns
+    -------
+    Dataset, list of int
+        Returns a Dataset object and a list of integers corresponding to the groupings of the
+        respective atoms.
+
+    """
+
+    # zs = []
+    Xs = []
+    ys = []
+    fs = []
+
+    print("Loading...")
+
+    num_samples = 0
+
+    for hdf5file in hdf5files:
+        print("Processing", hdf5file)
+        adl = pya.anidataloader(hdf5file)
+        for data in adl:
+
+            # Extract the data
+            P = data['path']
+            R = data['coordinates']
+            E = data['energies']
+            S = data['species']
+            smi = data['smiles']
+
+            path = P.split("/")[-1]
+
+            Z = convert_species_to_atomic_nums(S)
+
+            if len(Z) > MAX_ATOM_LIMIT:
+                print("skippng", P, 'n_atoms too large:', len(Z), '>', MAX_ATOM_LIMIT)
+                continue
+
+            minimum_wb97 = np.amin(E)
+            minimum_arg = np.argmin(E)
+
+            wb97offset = 0
+            mo62xoffset = 0
+
+            for z in Z:
+                wb97offset += selfIxnNrgWB97[z]
+                mo62xoffset += selfIxnNrgMO62x[z]
+
+            calibration_offset = 0
+
+            if calibration_map:
+                min_atomization_wb97 = minimum_wb97 - wb97offset
+                min_atomization_mo62x = calibration_map[path] - mo62xoffset
+                # difference between the wb97_min and the mo62x_min
+                calibration_offset = min_atomization_mo62x - min_atomization_wb97
+
+            for k in range(len(E)):
+
+                if k != minimum_arg:
+                    continue
+
+                if energy_cutoff is not None and E[k] - minimum_wb97 > energy_cutoff:
+                    continue
+
+                y = E[k] - wb97offset + calibration_offset
+                ys.append(y)
+
+                # print("asdf", np.zeros_like(R[k]))
+
+                fs.append(np.zeros_like(R[k]))
+
+                X = np.concatenate([np.expand_dims(Z, 1), R[k]], axis=1)
+                Xs.append(X)
+
+    return Xs, ys, fs
+
