@@ -39,8 +39,6 @@ def _ani_charge_grad(op, grads):
 
 @ops.RegisterGradient("Featurize")
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
-
-    print("FEAT GRAD")
     x,y,z,a,mo,macs,sis,acs = op.inputs
     dx, dy, dz = ani_mod.featurize_grad(
         x,
@@ -87,12 +85,9 @@ def _feat_grad_grad(op, dLdx, dLdy, dLdz):
 
     # is this correct?
     return [
-        # tf.square(x), # x
-        # tf.square(y), # y
-        # tf.square(z),
-        None,
-        None,
-        None,
+        None, # x 
+        None, # y
+        None, # z
         None, # a
         None, # mo
         None, # macs

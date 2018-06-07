@@ -243,7 +243,7 @@ void featurize_grad_cpu(
 
                         float accum_i_x = -2*R_eta*(-R_Rs[r_idx] + r_ij)*(i_x - j_x)*(0.5*cos(M_PI*r_ij/R_Rc) + 0.5)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_x - j_x)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))*sin(M_PI*r_ij/R_Rc)/(R_Rc*r_ij);
                         float accum_i_y = -2*R_eta*(-R_Rs[r_idx] + r_ij)*(i_y - j_y)*(0.5*cos(M_PI*r_ij/R_Rc) + 0.5)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_y - j_y)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))*sin(M_PI*r_ij/R_Rc)/(R_Rc*r_ij);
-                    float accum_i_z = -2*R_eta*(-R_Rs[r_idx] + r_ij)*(i_z - j_z)*(0.5*cos(M_PI*r_ij/R_Rc) + 0.5)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_z - j_z)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))*sin(M_PI*r_ij/R_Rc)/(R_Rc*r_ij);
+                        float accum_i_z = -2*R_eta*(-R_Rs[r_idx] + r_ij)*(i_z - j_z)*(0.5*cos(M_PI*r_ij/R_Rc) + 0.5)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_z - j_z)*exp(-R_eta*pow(-R_Rs[r_idx] + r_ij, 2))*sin(M_PI*r_ij/R_Rc)/(R_Rc*r_ij);
 
                         X_grads[g_atom_idx_i] += accum_i_x * d_y_i;
                         Y_grads[g_atom_idx_i] += accum_i_y * d_y_i;

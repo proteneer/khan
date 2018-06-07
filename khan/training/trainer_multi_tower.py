@@ -22,14 +22,6 @@ ani_mod = None
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     x,y,z,a,mo,macs,sis,acs = op.inputs
     fh, fc, fn, fo = op.outputs
-
-    # print("--------------")
-    # print(grad_hs.inputs)
-    # print(grad_hs.outputs)
-
-    # assert 0
-
-    # this is done in-place/in-line
     dLdx, dLdy, dLdz = ani_mod.featurize_grad(
         x,
         y,
@@ -56,22 +48,16 @@ def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
         None, # dLdacs
     ]
 
-# the other dLs aren't passed in because they're None
-# use the chain rule:
-
-# dL/dt = dL/dE/dx)*(d^2E/dxdt), the lhs are inputs already provided
-# recall that:
-# dE/dx = (dE/df)*(df/dx) where f is the ani_1 featurization
-# by the product rule:
-# d^2E/dxdt = (d^2E/dfdt)*(df/dx) + (dE/df)*(d^2f/dxdt)
-# the rhs of the multiply is necessarily zero.
-# putting everything together:
-
-# shapes:   (N, 3)     (N, 3, 4, F)    (N, 3)
-# dL/dt = dL/(dE/dx) * ((d^2E/dfdt) * (df/dx)) 
-# returns: # (N, 4, F)
-# where the lhs are the inputs to this op and the outputs are the last
-# 4 components
+# let g = a * b where:
+# g = dE/dx
+# a = dE/df
+# b = df/dx
+# the gradient of g is:
+# dL/da = dL/dg * dg/da
+# note that dg/da is simply b
+# hence dL/da = dL/dg * b whereby the accumulation is now over
+# the feature parameters (as opposed to the coordinates)
+# ask yutong for how this works if you can't figure it out
 @ops.RegisterGradient("FeaturizeGrad")
 def _feat_grad_grad(op, dLdx, dLdy, dLdz):
     x,y,z,a,mo,macs,sis,acs,gh,gc,gn,go = op.inputs
