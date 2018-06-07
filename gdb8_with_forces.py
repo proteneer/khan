@@ -60,10 +60,7 @@ def main():
 
     all_Xs_f, all_Ys_f, all_Fs_f = data_loader.load_gdb8_forces(ANI_TRAIN_DIR) # todo: figure out how to split this consistently later
 
-    print("---", all_Fs_f)
-
     rd_train_forces = RawDataset(all_Xs_f, all_Ys_f, all_Fs_f)
-
 
     with tf.Session(config=config) as sess:
 
