@@ -22,7 +22,8 @@ class RawDataset():
             not needed when doing inference.
 
         all_grads: np.array(optional),
-            rank-3 numpy array representing the gradients of each coordinate.
+            rank-3 numpy array representing the forces on each coordinate. If this array is provided,
+            then every conformation must have a corresponding gradient.
 
         Example:
         -------
@@ -49,25 +50,25 @@ class RawDataset():
 
         gs = [
             np.array([
-                [1.0, 2.0, 3.0], # H grad
-                [2.0, 1.0, 4.0], # N grad
-                [0.5, 1.2, 2.3], # H grad
-                [0.3, 1.7, 3.2], # C grad
-                [0.6, 1.2, 1.1], # N grad
-                [14.0, 23.0, 15.0], # H grad
-                [2.0, 0.5, 0.3], # H grad
-                [2.3, 0.2, 0.4]  # H grad
+                [1.0, 2.0, 3.0], # H force
+                [2.0, 1.0, 4.0], # N force
+                [0.5, 1.2, 2.3], # H force
+                [0.3, 1.7, 3.2], # C force
+                [0.6, 1.2, 1.1], # N force
+                [14.0, 23.0, 15.0], # H force
+                [2.0, 0.5, 0.3], # H force
+                [2.3, 0.2, 0.4]  # H force
             ]), # mol0 forces
             np.array([
-                [2.3, 0.2, 0.4], # H
-                [0.3, 1.7, 3.2], # C
-                [0.6, 1.2, 1.1], # N
-            ]), # mol1 forces
+                [2.3, 0.2, 0.4], # H force
+                [0.3, 1.7, 3.2], # C force
+                [0.6, 1.2, 1.1], # N force
+            ])  # mol1 forces
         ]
 
         dataset = RawDataset(Xs, ys)
 
-        for xs, m_ids, ys in dataset.iterate(2, batch_size=4, shuffle=True):
+        for xs, m_ids, ys, gs in dataset.iterate(2, batch_size=4, shuffle=True):
             print(xs) => mol1 then mol 0
             print(m_ids) => [1,1,1,0,0,0,0,0]
             print(ys) => [3.3, 1.5]
@@ -76,11 +77,14 @@ class RawDataset():
             API, so long as the num_mols(), num_batches(), an iterate() methods are implemented.
 
         """
+        if all_grads is not None:
+            for g in all_grads:
+                assert g is not None
+
         self.all_ys = all_ys
         self.all_Xs = all_Xs
         self.all_grads = all_grads
 
-        # print("ALL_GRADS", self.all_grads)
 
     def num_mols(self):
         """
@@ -166,10 +170,9 @@ class RawDataset():
 
             if self.all_grads is not None:
                 mol_grads = []
-                # print("X")
                 for p_idx in perm[s_m_idx:e_m_idx]:
-                    # print("Y")
                     mol_grads.append(self.all_grads[p_idx])                
+                
                 mol_grads = np.concatenate(mol_grads, axis=0)
 
             yield mol_Xs, mol_ids, mol_yts, mol_grads

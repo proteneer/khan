@@ -191,7 +191,7 @@ class TrainerMultiTower():
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
         fit_charges=False,
-        fit_forces=False,
+        # fit_forces=False,
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -242,12 +242,12 @@ class TrainerMultiTower():
             self.bi_enq,
         ]
 
-        if fit_forces:
-            self.force_enq_x = tf.placeholder(dtype=tf.float32, name="dx") # (batch_size, 1)
-            self.force_enq_y = tf.placeholder(dtype=tf.float32, name="dy") # (batch_size, 1)
-            self.force_enq_z = tf.placeholder(dtype=tf.float32, name="dz") # (batch_size, 1)
-            dtypes.extend([tf.float32, tf.float32, tf.float32])
-            qtypes.extend([self.force_enq_x, self.force_enq_y, self.force_enq_z])
+        # force fitting
+        self.force_enq_x = tf.placeholder(dtype=tf.float32, name="dx") # (batch_size, 1)
+        self.force_enq_y = tf.placeholder(dtype=tf.float32, name="dy") # (batch_size, 1)
+        self.force_enq_z = tf.placeholder(dtype=tf.float32, name="dz") # (batch_size, 1)
+        dtypes.extend([tf.float32, tf.float32, tf.float32])
+        qtypes.extend([self.force_enq_x, self.force_enq_y, self.force_enq_z])
 
         queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=dtypes);
 
@@ -257,7 +257,7 @@ class TrainerMultiTower():
 
         with tf.device('/cpu:0'):
 
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-4), trainable=False)
             self.optimizer = tf.train.AdamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -296,8 +296,7 @@ class TrainerMultiTower():
                                 get_op = queue.dequeue()
                                 x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
 
-                                if fit_forces:
-                                    dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
+                                dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
 
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
@@ -396,20 +395,22 @@ class TrainerMultiTower():
 
                             self.tower_coord_grads.append([p_dx, p_dy, p_dz])
 
+                            # forces are the negative of the gradient
+                            f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
+
                             # optionally fit to the forces
-                            if fit_forces:
-                                dx_l2 = tf.pow(p_dx - dx_deq, 2)
-                                dy_l2 = tf.pow(p_dy - dy_deq, 2)
-                                dz_l2 = tf.pow(p_dz - dz_deq, 2)
-                                dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
-                                dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
-                                dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
-                                # (todo): triple check that F = -grad(V)
-                                tower_force_rmse = dx_l2 + dy_l2 + dz_l2
-                                self.tower_force_rmses.append(tower_force_rmse)
-                                tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
-                                tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
-                                self.tower_force_grads.append(tower_force_grad)
+                            dx_l2 = tf.pow(f_dx - dx_deq, 2)
+                            dy_l2 = tf.pow(f_dy - dy_deq, 2)
+                            dz_l2 = tf.pow(f_dz - dz_deq, 2)
+                            dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
+                            dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
+                            dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
+                            # (todo): triple check that F = -grad(V)
+                            tower_force_rmse = dx_l2 + dy_l2 + dz_l2
+                            self.tower_force_rmses.append(tower_force_rmse)
+                            tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
+                            tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
+                            self.tower_force_grads.append(tower_force_grad)
 
             self.best_params = []
             self.save_best_params_ops = []
@@ -433,8 +434,8 @@ class TrainerMultiTower():
 
             self.train_op = tower_grads(self.tower_grads)
 
-            if fit_forces:
-                self.train_op_forces = tower_grads(self.tower_force_grads)
+            # if fit_forces:
+            self.train_op_forces = tower_grads(self.tower_force_grads)
 
         ws = self._weight_matrices()
         max_norm_ops = []
@@ -712,9 +713,10 @@ class TrainerMultiTower():
                         feed_dict[self.force_enq_y] = mol_grads[:, 1]
                         feed_dict[self.force_enq_z] = mol_grads[:, 2]
                     else:
-                        feed_dict[self.force_enq_x] = np.zeros_like(mol_xs[:, 0])
-                        feed_dict[self.force_enq_y] = np.zeros_like(mol_xs[:, 1])
-                        feed_dict[self.force_enq_z] = np.zeros_like(mol_xs[:, 2])
+                        num_mols = mol_xs.shape[0]
+                        feed_dict[self.force_enq_x] = np.zeros((num_mols, 0), dtype=np.float32)
+                        feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=np.float32)
+                        feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=np.float32)
 
                     self.sess.run(self.put_op, feed_dict=feed_dict)
 
