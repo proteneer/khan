@@ -138,9 +138,6 @@ class RawDataset():
         the remainder num_mols % batch_size.
 
         """
-
-        # print("ITERATE", self.all_grads)
-
         perm = np.arange(len(self.all_Xs))
         if shuffle:
             np.random.shuffle(perm)
