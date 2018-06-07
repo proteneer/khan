@@ -6,9 +6,7 @@ import json
 import client_server
 
 KCAL = 627.509
-BOHR = 0.529
-
-
+BOHR = 0.52917721092 
 
 # copied from data_utils so no imports are necessary
 def atomic_number_to_atom_id(atno):
@@ -31,6 +29,9 @@ def read_json(fname):
     # need to change atomic numbers to atom id
     for line in X:
         line[0] = atomic_number_to_atom_id(line[0])
+        line[1] = line[1]*BOHR
+        line[2] = line[2]*BOHR
+        line[3] = line[3]*BOHR
 
     return json.dumps({"X": X})
 
@@ -70,7 +71,7 @@ def parse_args(args):
     parser.add_argument(
        "--outfile",
        action="store",
-       default="output.json",
+       default="ani1_output.json",
        help="output filename"
     )
     
@@ -85,15 +86,10 @@ def main():
     send_data = read_json(args.infile)
 
     s = client_server.connect_socket(args.host, args.port, server=False)
-    print("send data", send_data)
     client_server.send(s, send_data)
 
     rcv_data = client_server.recieve(s)
 
-    print("data from server:")
-    print(rcv_data)
-
-    print("write outfile %s" % args.outfile)
     with open(args.outfile, "w") as fout:
         fout.write(rcv_data)
 

@@ -3,6 +3,8 @@
 
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
+import data_utils
+from analyze_errors import fdiff_grad
 import tensorflow as tf
 import argparse
 import os
@@ -12,7 +14,7 @@ import json
 import client_server
 
 KCAL = 627.509
-BOHR = 0.529
+BOHR = 0.52917721092 
 ENCODING = 'utf-8'
 
 MAX_BYTES = 1024**2
@@ -53,6 +55,20 @@ def parse_args(args):
     )
 
     parser.add_argument(
+        '--deep_network',
+        action='store_true',
+        help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)'
+    )
+
+
+    parser.add_argument(
+        "--fdiff_grad",
+        action="store_true",
+        default=False,
+        help="finite difference the gradients"
+    )
+
+    parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
@@ -74,11 +90,16 @@ def main():
 
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
+
+        layer_sizes = (128, 128, 64, 1)
+        if args.deep_network:
+            layer_sizes = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
         towers = ["/cpu:0"]
+        print("start with layers", layer_sizes)
         trainer = TrainerMultiTower(
             sess,
             towers,
-            layer_sizes=(128, 128, 64, 1)
+            layer_sizes=layer_sizes
         )
 
         trainer.load(save_dir)
@@ -110,10 +131,35 @@ def main():
                     X_np = np.array(X, dtype=np.float32)
                     rd = RawDataset([X_np], [0.0])
 
+                    # should I go back to total energy?
                     energy = float(trainer.predict(rd)[0])
+                    self_interaction = sum(
+                        data_utils.selfIxnNrgWB97X_631gdp[example[0]] for example in X
+                    )
+                    energy += self_interaction
+
                     gradient = list(trainer.coordinate_gradients(rd))[0]
                     natoms, ndim = gradient.shape
-                    gradient = [float(g) for g in gradient.reshape(natoms*ndim)]
+                    gradient = gradient.reshape(natoms*ndim)
+
+                    if args.fdiff_grad:
+                        fd_gradient = fdiff_grad(X_np, trainer)
+                        dg = gradient - fd_gradient
+                        grms = np.sqrt(sum(dg[:]**2.0)/(natoms*ndim))
+                        dot = np.dot(gradient, fd_gradient) 
+                        norm_g = np.sqrt(np.dot(gradient, gradient))
+                        norm_fd = np.sqrt(np.dot(fd_gradient, fd_gradient))
+                        dot = np.dot(gradient, fd_gradient) / (norm_fd * norm_g)
+                        gradient[:] = fd_gradient[:]
+                        print("RMS gradient fdiff/analytic %.4e" % grms)
+                        print("Gradient dot product %.4f" % dot)
+
+                    # convert gradient from hartree/angstrom to hartree/bohr
+                    # and to jsonable format
+                    gradient = [float(g)*BOHR for g in gradient]
+
+                    print("sending gradient")
+                    print(gradient)
 
                     send_data = json.dumps({"energy": energy, "gradient": gradient})
 

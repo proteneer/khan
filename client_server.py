@@ -14,11 +14,9 @@ def connect_socket(host, port, server=True):
     if server:
         s.bind((host, port))
         s.listen(BACKLOG)
-        print("connecting server")
     else:
         remote_ip = socket.gethostbyname(host)
         s.connect((remote_ip, port))
-        print("connecting client")
 
     return s
 

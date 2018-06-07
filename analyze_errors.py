@@ -138,7 +138,8 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers,
-            layer_sizes=(128, 128, 64, 1)
+            layer_sizes=(128, 128, 64, 1),
+            fit_charges=True
         )
 
         trainer.load(save_dir)

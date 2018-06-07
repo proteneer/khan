@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--reactivity-dir', default=None, help='location of reactivity data')
     parser.add_argument('--reactivity-test-percent', default=0.25, type=float, help='percent of reactions to put in test set')
 
+    parser.add_argument('--deep_network', action='store_true', help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)')
+
     args = parser.parse_args()
 
     print("Arguments", args)
@@ -98,10 +100,14 @@ def main():
 
         print("towers:", towers)
 
+        layer_sizes = (128, 128, 64, 1)
+        if args.deep_network:
+            layer_sizes = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=(128, 128, 64, 1),
+            layer_sizes=layer_sizes
         )
 
         if os.path.exists(save_dir):
