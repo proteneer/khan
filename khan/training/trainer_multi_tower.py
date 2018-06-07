@@ -323,6 +323,7 @@ class TrainerMultiTower():
             self.load_best_params_ops = []
 
             for var in self.parameters:
+                continue
                 copy_name = "best_"+var.name.split(":")[0]
 
                 copy_shape = var.shape
@@ -360,12 +361,14 @@ class TrainerMultiTower():
         """
         Copy the current model's trainable parameters as the best so far.
         """
+        return
         self.sess.run(self.save_best_params_ops)
 
     def load_best_params(self):
         """
         Restore the current model's parameters from the best found so far.
         """
+        return
         self.sess.run(self.load_best_params_ops)
 
     def save(self, save_dir):
