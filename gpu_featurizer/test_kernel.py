@@ -66,6 +66,41 @@ def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
         None,
     ]
 
+@ops.RegisterGradient("FeaturizeGrad")
+def _feat_grad_grad(op, dLdx, dLdy, dLdz):
+    x,y,z,a,mo,macs,sis,acs,gh,gc,gn,go = op.inputs
+    dh, dc, dn, do = ani_mod.featurize_grad_inverse(
+        x,
+        y,
+        z,
+        a,
+        mo,
+        macs,
+        sis,
+        acs,
+        dLdx,
+        dLdy,
+        dLdz
+    )
+
+    # is this correct?
+    return [
+        None, # x 
+        None, # y
+        None, # z
+        None, # a
+        None, # mo
+        None, # macs
+        None, # sis
+        None, # acs
+        dh,
+        dc,
+        dn,
+        do
+    ]
+
+
+
 def linearize(i, j, k, l):
     if j < i:
         tmp = i
@@ -100,7 +135,7 @@ class TestFeaturizer(unittest.TestCase):
 
     def setUp(self):
 
-        cp = tf.ConfigProto(log_device_placement=True, device_count = {'GPU': 1})
+        cp = tf.ConfigProto(log_device_placement=False, device_count = {'GPU': 1})
         self.sess = tf.Session(config=cp)
 
         # self.sess = tf.Session()
@@ -317,6 +352,33 @@ class TestFeaturizer(unittest.TestCase):
             mol_atom_counts
         )
 
+        with self.sess:
+
+            ph_t = tf.placeholder(dtype=tf.float32)
+
+            E = tf.multiply(features, ph_t)
+
+            t = np.random.rand(1, 384)
+            forces_x = tf.gradients(E, [ph_xs])[0]
+            force_loss = tf.reduce_sum(forces_x)
+
+            error = tf.test.compute_gradient_error(
+                ph_t,
+                (1, 384),
+                force_loss,
+                (1,),
+                x_init_value=t,
+                delta=0.01,
+                extra_feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types
+                }
+            )
+
+            assert error < 0.003
 
         with self.sess:
 
