@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.framework import ops
+from tensorflow.contrib.opt import NadamOptimizer
 
 import khan
 from khan.utils.helpers import ed_harder_rmse
@@ -102,15 +103,10 @@ def average_gradients(tower_grads):
     for grad_and_vars in zip(*tower_grads):
         grads = []
         for g, _ in grad_and_vars:
-            if g is None:
-                continue
             # Add 0 dimension to the gradients to represent the tower.
             expanded_g = tf.expand_dims(g, 0)
             # Append on a 'tower' dimension which we will average over below.
             grads.append(expanded_g)
-
-        if len(grads) == 0:
-            continue
 
         # Average over the 'tower' dimension.
         grad = tf.concat(grads, 0)
@@ -132,7 +128,8 @@ class TrainerMultiTower():
         sess,
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
-        fit_charges=False
+        fit_charges=False,
+        gaussian_activation=False
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -148,6 +145,9 @@ class TrainerMultiTower():
 
         fit_charges: bool
             Whether or not we fit partial charges
+
+        gaussian_activation: bool
+            Use a gaussian activation function
 
         """
         self.towers = towers
@@ -187,8 +187,8 @@ class TrainerMultiTower():
 
         with tf.device('/cpu:0'):
 
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-3), trainable=False)
-            self.optimizer = tf.train.AdamOptimizer(
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-4), trainable=False)
+            self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
                     beta2=0.999,
@@ -261,7 +261,9 @@ class TrainerMultiTower():
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
                                 layer_sizes=(feat_size,) + layer_sizes,
-                                prefix="near_")
+                                prefix="near_",
+                                gaussian_activation=gaussian_activation
+                            )
 
                             # avoid duplicate parameters from later towers since the variables are shared.
                             if tower_idx == 0:
@@ -276,7 +278,9 @@ class TrainerMultiTower():
                                     atom_type_features=[f0, f1, f2, f3],
                                     gather_idxs=gather_idxs,
                                     layer_sizes=(feat_size,) + layer_sizes,
-                                    prefix="charge_")
+                                    prefix="charge_",
+                                    gaussian_activation=gaussian_activation
+                                )
 
                                 if tower_idx == 0:
                                     self.parameters.extend(tower_model_charges.get_parameters())
@@ -323,7 +327,6 @@ class TrainerMultiTower():
             self.load_best_params_ops = []
 
             for var in self.parameters:
-                continue
                 copy_name = "best_"+var.name.split(":")[0]
 
                 copy_shape = var.shape
@@ -361,14 +364,12 @@ class TrainerMultiTower():
         """
         Copy the current model's trainable parameters as the best so far.
         """
-        return
         self.sess.run(self.save_best_params_ops)
 
     def load_best_params(self):
         """
         Restore the current model's parameters from the best found so far.
         """
-        return
         self.sess.run(self.load_best_params_ops)
 
     def save(self, save_dir):

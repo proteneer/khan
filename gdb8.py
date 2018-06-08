@@ -29,6 +29,15 @@ def main():
     parser.add_argument('--reactivity-test-percent', default=0.25, type=float, help='percent of reactions to put in test set')
 
     parser.add_argument('--deep_network', action='store_true', help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)')
+    parser.add_argument(
+        '--gaussian-activation',
+        action='store_true',
+        help='Use gaussian activation functions'
+    )
+    parser.add_argument(
+        '--fit-charges',
+        action='store_true',
+        help='fit charges'
 
     args = parser.parse_args()
 
@@ -107,7 +116,9 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            layer_sizes=layer_sizes
+            layer_sizes=layer_sizes,
+            fit_charges=args.fit_charges,
+            gaussian_activation=args.gaussian_activation
         )
 
         if os.path.exists(save_dir):

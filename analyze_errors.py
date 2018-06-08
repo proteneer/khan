@@ -139,7 +139,8 @@ def main():
             sess,
             towers,
             layer_sizes=(128, 128, 64, 1),
-            fit_charges=True
+            fit_charges=args.fit_charges,
+            gaussian_activation=args.gaussian_activation
         )
 
         trainer.load(save_dir)
@@ -279,6 +280,16 @@ def parse_args(args):
         action="store_true",
         default=False,
         help="write data to visualize energy along path"
+    )
+    parser.add_argument(
+        '--gaussian-activation',
+        action='store_true',
+        help='Use gaussian activation functions'
+    )
+    parser.add_argument(
+        '--fit-charges',
+        action='store_true',
+        help='fit charges'
     )
     
     args = parser.parse_args()

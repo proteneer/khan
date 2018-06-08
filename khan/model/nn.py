@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, atom_type="", prefix=""):
+    def __init__(self, features, layer_sizes, atom_type="", prefix="", gaussian_activation=False):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -57,7 +57,10 @@ class AtomNN():
                 )
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
-                A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
+                if gaussian_activation:
+                    A = tf.exp(-1*tf.pow(A, 2))
+                else:
+                    A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
                 #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
                 #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
 
@@ -130,7 +133,8 @@ class MoleculeNN():
         atom_type_features,
         gather_idxs,
         layer_sizes,
-        prefix):
+        prefix,
+        gaussian_activation):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
 
@@ -160,7 +164,7 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type, prefix)
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type, prefix, gaussian_activation)
             self.anns.append(ann)
             atom_type_nrgs.append(ann.atom_energies())
 
