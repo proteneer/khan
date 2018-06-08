@@ -74,38 +74,3 @@ void AniGrad<CPUDevice>::operator()(
 };
 
 template struct AniGrad<CPUDevice>;
-
-template<>
-void AniGradInverse<CPUDevice>::operator()(
-    const CPUDevice& d,
-    const float *Xs,
-    const float *Ys,
-    const float *Zs,
-    const int *atomic_nums,
-    const int *mol_offsets,
-    const int *mol_atom_count,
-    const int num_mols, // actually equal to blockDim.x
-    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-    const float *X_grads,
-    const float *Y_grads,
-    const float *Z_grads,
-    float *output_H_grads,
-    float *output_C_grads,
-    float *output_N_grads,
-    float *output_O_grads,
-    const int *acs
-    ) {
-
-    memset(output_H_grads, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_C_grads, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_N_grads, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_O_grads, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int));
-
-    featurize_grad_inverse(
-      Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-      X_grads, Y_grads, Z_grads,
-      output_H_grads, output_C_grads, output_N_grads, output_O_grads);
-
-};
-
-template struct AniGradInverse<CPUDevice>;

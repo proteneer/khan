@@ -44,28 +44,4 @@ struct AniGrad {
     const int *acs);
 };
 
-template <typename Device>
-struct AniGradInverse {
-  void operator()(
-    const Device& d,
-    const float *Xs,
-    const float *Ys,
-    const float *Zs,
-    const int *atomic_nums,
-    const int *mol_offsets,
-    const int *mol_atom_count,
-    const int num_mols, // actually equal to blockDim.x
-    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-    const float *X_grads,
-    const float *Y_grads,
-    const float *Z_grads,
-    float *output_H_grads,
-    float *output_C_grads,
-    float *output_N_grads,
-    float *output_O_grads,
-    const int *acs);
-};
-
-
-
 #endif

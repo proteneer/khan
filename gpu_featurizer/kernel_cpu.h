@@ -34,22 +34,4 @@ void featurize_grad_cpu(
     float *Y_grads,
     float *Z_grads);
 
-void featurize_grad_inverse(
-    const float *input_Xs,
-    const float *input_Ys,
-    const float *input_Zs,
-    const int *input_As,
-    const int *mol_offsets,
-    const int *input_MACs,
-    const int n_mols, // denotes where the atom is being displaced to
-    const int *scatter_idxs, // used to retrieve the grad multiplication factor for backprop
-    const float *X_grads,
-    const float *Y_grads,
-    const float *Z_grads, 
-
-    float *H_grads,
-    float *C_grads,
-    float *N_grads,
-    float *O_grads);
-
 #endif

@@ -16,14 +16,10 @@ from data_utils import HARTREE_TO_KCAL_PER_MOL
 
 ani_mod = None
 
-
-# dE/dx = (dE/df)*(df/dx)
 @ops.RegisterGradient("Featurize")
-# featurization takes in (x,y,z,a,offsets,input gradients for hcno) and returns a collected dx,dy,dz
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     x,y,z,a,mo,macs,sis,acs = op.inputs
-    fh, fc, fn, fo = op.outputs
-    dLdx, dLdy, dLdz = ani_mod.featurize_grad(
+    dx, dy, dz = ani_mod.featurize_grad(
         x,
         y,
         z,
@@ -39,54 +35,14 @@ def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     )
 
     return [
-        dLdx,
-        dLdy,
-        dLdz,
-        None, # dLda
-        None, # dLdmo
-        None, # dLdmacs
-        None, # dLdsis
-        None, # dLdacs
-    ]
-
-# let g = a * b where:
-# g = dE/dx
-# a = dE/df
-# b = df/dx
-# the gradient of g is:
-# dL/da = dL/dg * dg/da
-# note that dg/da is simply b
-# hence dL/da = dL/dg * b whereby the accumulation is now over
-# the feature parameters (as opposed to the coordinates)
-# ask yutong for how this works if you can't figure it out
-@ops.RegisterGradient("FeaturizeGrad")
-def _feat_grad_grad(op, dLdx, dLdy, dLdz):
-    x,y,z,a,mo,macs,sis,acs,gh,gc,gn,go = op.inputs
-    dh, dc, dn, do = ani_mod.featurize_grad_inverse(
-        x,
-        y,
-        z,
-        a,
-        mo,
-        macs,
-        sis,
-        acs,
-        dLdx,
-        dLdy,
-        dLdz
-    )
-
-    # is this correct?
-    return [
-        None, # x
-        None, # y
-        None, # z
-        None, # a
-        None, # mo
-        None, # macs
-        None, # sis
-        None, # acs
-        dh, dc, dn, do
+        dx,
+        dy,
+        dz,
+        None,
+        None,
+        None,
+        None,
+        None,
     ]
 
 @ops.RegisterGradient("AniCharge")
@@ -207,49 +163,31 @@ class TrainerMultiTower():
         self.yt_enq = tf.placeholder(dtype=tf.float32)
         self.bi_enq = tf.placeholder(dtype=tf.int32)
 
-        dtypes=[
-            tf.float32,  # Xs
-            tf.float32,  # Ys
-            tf.float32,  # Zs
-            tf.int32,    # As
-            tf.int32,    # mol ids
-            tf.float32,  # Y TRUEss
-            tf.int32,    # b_idxs
-        ]
+        queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=[
+                tf.float32,  # Xs
+                tf.float32,  # Ys
+                tf.float32,  # Zs
+                tf.int32,    # As
+                tf.int32,    # mol ids
+                tf.float32,  # Y TRUEss
+                tf.int32,    # b_idxs
+            ]);
 
-        qtypes = [
+        self.put_op = queue.enqueue([
             self.x_enq,
             self.y_enq,
             self.z_enq,
             self.a_enq,
             self.m_enq,
             self.yt_enq,
-            self.bi_enq,
-        ]
-
-        # force fitting
-        self.force_enq_x = tf.placeholder(dtype=tf.float32, name="dx") # (batch_size, 1)
-        self.force_enq_y = tf.placeholder(dtype=tf.float32, name="dy") # (batch_size, 1)
-        self.force_enq_z = tf.placeholder(dtype=tf.float32, name="dz") # (batch_size, 1)
-        dtypes.extend([tf.float32, tf.float32, tf.float32])
-        qtypes.extend([self.force_enq_x, self.force_enq_y, self.force_enq_z])
-
-        queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=dtypes);
-
-        self.put_op = queue.enqueue(qtypes)
+            self.bi_enq
+        ])
 
         self.sess = sess
 
         with tf.device('/cpu:0'):
 
-            self.learning_rate = tf.get_variable(
-                'learning_rate',
-                tuple(),
-                tf.float32,
-                tf.constant_initializer(1e-4),
-                trainable=False
-            )
-
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-4), trainable=False)
             self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -266,7 +204,6 @@ class TrainerMultiTower():
 
             # these data elements are unordered since the gpu grabs the batches in different orders
             self.tower_grads = [] # average is order invariant
-            self.tower_force_grads = [] # yell at yutong for naming this
             self.tower_preds = []
             self.tower_bids = []
             self.tower_l2s = []
@@ -275,7 +212,6 @@ class TrainerMultiTower():
             self.tower_features = []
             self.all_models = []
             self.tower_exp_loss = []
-            self.tower_force_rmses = []
             self.parameters = []
 
             # parameters within a tower are shared.
@@ -287,9 +223,6 @@ class TrainerMultiTower():
                             with tf.device('/cpu:0'):
                                 get_op = queue.dequeue()
                                 x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
-
-                                dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
-
                                 self.tower_bids.append(bi_deq)
                                 mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
                                 mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
@@ -375,38 +308,19 @@ class TrainerMultiTower():
                             else:
                                 tower_pred = tower_near_energy
 
-                            tf.get_variable_scope().reuse_variables()
-
                             self.tower_preds.append(tower_pred)
                             tower_l2 = tf.squared_difference(tower_pred, labels)
-
                             self.tower_l2s.append(tower_l2)
+
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
                             tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
+
+                            tf.get_variable_scope().reuse_variables()
                             self.tower_exp_loss.append(tower_exp_loss)
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
                             self.tower_grads.append(tower_grad)
 
-                            p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
-
-                            self.tower_coord_grads.append([p_dx, p_dy, p_dz])
-
-                            # forces are the negative of the gradient
-                            f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
-
-                            # optionally fit to the forces
-                            dx_l2 = tf.pow(f_dx - dx_deq, 2)
-                            dy_l2 = tf.pow(f_dy - dy_deq, 2)
-                            dz_l2 = tf.pow(f_dz - dz_deq, 2)
-                            dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
-                            dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
-                            dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
-                            # (todo): triple check that F = -grad(V)
-                            tower_force_rmse = dx_l2 + dy_l2 + dz_l2
-                            self.tower_force_rmses.append(tower_force_rmse)
-                            tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
-                            tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
-                            self.tower_force_grads.append(tower_force_grad)
+                            self.tower_coord_grads.append(tf.gradients(tower_pred, [x_deq, y_deq, z_deq]))
 
             self.best_params = []
             self.save_best_params_ops = []
@@ -422,16 +336,10 @@ class TrainerMultiTower():
                 self.save_best_params_ops.append(tf.assign(var_copy, var))
                 self.load_best_params_ops.append(tf.assign(var, var_copy))
 
-            def tower_grads(grads):
-                apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
-                variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
-                variables_averages_op = variable_averages.apply(tf.trainable_variables())
-                return tf.group(apply_gradient_op, variables_averages_op)
-
-            self.train_op = tower_grads(self.tower_grads)
-
-            # if fit_forces:
-            self.train_op_forces = tower_grads(self.tower_force_grads)
+            apply_gradient_op = self.optimizer.apply_gradients(average_gradients(self.tower_grads), global_step=self.global_step)
+            variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
+            variables_averages_op = variable_averages.apply(tf.trainable_variables())
+            self.train_op = tf.group(apply_gradient_op, variables_averages_op)
 
         ws = self._weight_matrices()
         max_norm_ops = []
@@ -687,12 +595,11 @@ class TrainerMultiTower():
 
                 n_batches = dataset.num_batches(batch_size)
 
-                for b_idx, (mol_xs, mol_idxs, mol_yts, mol_grads) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
+                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
                     if before_hooks:
                         self.sess.run(before_hooks)
-
-                    feed_dict = {
+                    self.sess.run(self.put_op, feed_dict={
                         self.x_enq: mol_xs[:, 1],
                         self.y_enq: mol_xs[:, 2],
                         self.z_enq: mol_xs[:, 3],
@@ -700,49 +607,25 @@ class TrainerMultiTower():
                         self.m_enq: mol_idxs,
                         self.yt_enq: mol_yts,
                         self.bi_enq: b_idx
-                    }
-
-                    # print("XS", mol_xs, mol_grads)
-
-                    if mol_grads is not None:
-                        feed_dict[self.force_enq_x] = mol_grads[:, 0]
-                        feed_dict[self.force_enq_y] = mol_grads[:, 1]
-                        feed_dict[self.force_enq_z] = mol_grads[:, 2]
-                    else:
-                        num_mols = mol_xs.shape[0]
-                        feed_dict[self.force_enq_x] = np.zeros((num_mols, 0), dtype=np.float32)
-                        feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=np.float32)
-                        feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=np.float32)
-
-                    self.sess.run(self.put_op, feed_dict=feed_dict)
+                    })
 
                     g_b_idx += 1
 
-                # division across multiple towers
                 remainder = n_batches % self.num_towers
                 if remainder:
                     for _ in range(self.num_towers - remainder):
                         if before_hooks:
                             self.sess.run(before_hooks)
-
-                        feed_dict = {
+                        self.sess.run(self.put_op, feed_dict={
                             self.x_enq: np.zeros((0, 1), dtype=np.float32),
                             self.y_enq: np.zeros((0, 1), dtype=np.float32),
                             self.z_enq: np.zeros((0, 1), dtype=np.float32),
-                            self.a_enq: np.zeros((0,), dtype=np.int32),
-                            self.m_enq: np.zeros((0,), dtype=np.int32),
-                            self.yt_enq: np.zeros((0,)),
+                            self.a_enq: np.zeros((0, ), dtype=np.int32),
+                            self.m_enq: np.zeros((0, ), dtype=np.int32),
+                            self.yt_enq: np.zeros((0, )),
                             self.bi_enq: b_idx,
-                        }
-
-                        # if mol_grads is not None:
-                        feed_dict[self.force_enq_x] = np.zeros((0, 1), dtype=np.float32)
-                        feed_dict[self.force_enq_y] = np.zeros((0, 1), dtype=np.float32)
-                        feed_dict[self.force_enq_z] = np.zeros((0, 1), dtype=np.float32)
-
-                        self.sess.run(self.put_op, feed_dict=feed_dict)
+                        })
                         b_idx += 1
-
             except Exception as e:
                 print("QueueError:", e)
 
