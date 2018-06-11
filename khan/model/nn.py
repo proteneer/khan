@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, atom_type="", prefix=""):
+    def __init__(self, features, layer_sizes, precision, atom_type="", prefix=""):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -17,13 +17,14 @@ class AtomNN():
             0th layer should be the size of the features, while the last layer must
             be exactly of size 1.
 
-        activation_fns: list of functions
-            A list of activation
+        precision: tf.dtype
+            Should be either tf.float32 or tf.float64        
 
         atom_type: str
             The type of atom we're 
 
         """
+        assert (precision is tf.float32) or (precision is tf.float64)
 
         assert layer_sizes[-1] == 1
 
@@ -41,7 +42,7 @@ class AtomNN():
                 W = tf.get_variable(
                     prefix+"W"+name,
                     (x, y),
-                    np.float32,
+                    precision,
                     #tf.random_uniform_initializer(minval=-0.1, maxval=0.1),
                     #tf.random_normal_initializer(stddev=0.1),
                     # tf.random_normal_initializer(mean=0, stddev=1.0/x),
@@ -51,7 +52,7 @@ class AtomNN():
                 b = tf.get_variable(
                     prefix+"b"+name,
                     (y),
-                    np.float32,
+                    precision,
                     tf.zeros_initializer,
                     trainable=True
                 )
@@ -130,6 +131,7 @@ class MoleculeNN():
         atom_type_features,
         gather_idxs,
         layer_sizes,
+        precision,
         prefix):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
@@ -160,7 +162,7 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type, prefix)
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, atom_type, prefix)
             self.anns.append(ann)
             atom_type_nrgs.append(ann.atom_energies())
 

@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 import numpy as np
 
-ani_mod = tf.load_op_library('ani.so');
+ani_mod = tf.load_op_library('ani_cpu.so');
 
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
@@ -211,9 +211,11 @@ class TestFeaturizer(unittest.TestCase):
                 r_ij = np.linalg.norm(i_xyz - j_xyz)
 
                 for r_idx, r_s in enumerate(R_Rs):
-                    summand = fC(r_ij, R_Rc) * math.exp(-R_eta*math.pow(r_ij-r_s, 2))
+                    # if r_ij < R_Rc and i_idx < j_idx:
+                    fc = fC(r_ij, R_Rc) 
+                    lhs = math.exp(-R_eta*math.pow(r_ij-r_s, 2))
+                    summand = fc * lhs
                     radial_feats[j_type*len(R_Rs)+r_idx] += summand
-
 
                 for k_idx, row_k in enumerate(mol):
 
@@ -256,229 +258,281 @@ class TestFeaturizer(unittest.TestCase):
     def test_featurizer(self):
 
 
-        # 8 + 3 atoms
-        atom_matrix = np.array([
-            [0, 1.0, 2.0, 3.0], # H
-            [2, 2.0, 1.0, 4.0], # N
-            [0, 0.5, 1.2, 2.3], # H
-            [1, 0.3, 1.7, 3.2], # C
-            [2, 0.6, 1.2, 1.1], # N
-            [0, 14.0, 23.0, 15.0], # H
-            [0, 2.0, 0.5, 0.3], # H
-            [0, 2.3, 0.2, 0.4], # H
+        precisions = [tf.float32, tf.float64]
+        # precisions = [tf.float64]
+        # precisions = [tf.float32]
+        with self.sess:
 
-            [0, 2.3, 0.2, 0.4], # H
-            [1, 0.3, 1.7, 3.2], # C
-            [2, 0.6, 1.2, 1.1], # N
-            ], dtype=np.float32)
+            for prec in precisions:
+
+                # 8 + 3 atoms
+                atom_matrix = np.array([
+                    [0, 1.0, 2.0, 3.0], # H
+                    [2, 2.0, 1.0, 4.0], # N
+                    [0, 0.5, 1.2, 2.3], # H
+                    [1, 0.3, 1.7, 3.2], # C
+                    [2, 0.6, 1.2, 1.1], # N
+                    [0, 14.0, 23.0, 15.0], # H
+                    [0, 2.0, 0.5, 0.3], # H
+                    [0, 2.3, 0.2, 0.4], # H
+
+                    [0, 2.3, 0.2, 0.4], # H
+                    [1, 0.3, 1.7, 3.2], # C
+                    [2, 0.6, 1.2, 1.1], # N
+                    ], dtype=prec.as_numpy_dtype)
 
 
-        mol_idxs = np.array([0,0,0,0,0,0,0,0,1,1,1], dtype=np.int32)
+                mol_idxs = np.array([0,0,0,0,0,0,0,0,1,1,1], dtype=np.int32)
 
-        atom_types = atom_matrix[:, 0].astype(np.int32)
-        x = atom_matrix[:, 1]
-        y = atom_matrix[:, 2]
-        z = atom_matrix[:, 3]
+                atom_types = atom_matrix[:, 0].astype(np.int32)
+                x = atom_matrix[:, 1]
+                y = atom_matrix[:, 2]
+                z = atom_matrix[:, 3]
 
-        ph_atom_types = tf.placeholder(dtype=np.int32, name="atom_types")
-        ph_xs = tf.placeholder(dtype=np.float32, name="xs")
-        ph_ys = tf.placeholder(dtype=np.float32, name="ys")
-        ph_zs = tf.placeholder(dtype=np.float32, name="zs")
-        ph_mol_idxs = tf.placeholder(dtype=np.int32, name="mol_idxs")
+                ph_atom_types = tf.placeholder(dtype=np.int32, name="atom_types")
+                ph_xs = tf.placeholder(dtype=prec, name="xs")
+                ph_ys = tf.placeholder(dtype=prec, name="ys")
+                ph_zs = tf.placeholder(dtype=prec, name="zs")
+                ph_mol_idxs = tf.placeholder(dtype=np.int32, name="mol_idxs")
 
-        scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(ph_atom_types)
+                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(ph_atom_types)
 
-        mol_atom_counts = tf.segment_sum(tf.ones_like(ph_mol_idxs), ph_mol_idxs)
-        mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
+                mol_atom_counts = tf.segment_sum(tf.ones_like(ph_mol_idxs), ph_mol_idxs)
+                mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
-        obtained_si, obtained_gi, obtained_ac = self.sess.run(
-            [scatter_idxs, gather_idxs, atom_counts],
-            feed_dict={
-                ph_mol_idxs: mol_idxs,
-                ph_atom_types: atom_types,
-            })
+                obtained_si, obtained_gi, obtained_ac = self.sess.run(
+                    [scatter_idxs, gather_idxs, atom_counts],
+                    feed_dict={
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types,
+                    })
 
-        np.testing.assert_array_equal(obtained_ac, [6,2,3,0])
-        np.testing.assert_array_equal(obtained_si, [0,0,1,0,1,2,3,4,5,1,2])
-        np.testing.assert_array_equal(obtained_gi, [0,8,1,6,9,2,3,4,5,7,10])
+                np.testing.assert_array_equal(obtained_ac, [6,2,3,0])
+                np.testing.assert_array_equal(obtained_si, [0,0,1,0,1,2,3,4,5,1,2])
+                np.testing.assert_array_equal(obtained_gi, [0,8,1,6,9,2,3,4,5,7,10])
 
-        f0, f1, f2, f3 = ani_mod.featurize(
-            ph_xs,
-            ph_ys,
-            ph_zs,
-            ph_atom_types,
-            mol_offsets,
-            mol_atom_counts,
-            scatter_idxs,
-            atom_counts
-        )
+                f0, f1, f2, f3 = ani_mod.featurize(
+                    ph_xs,
+                    ph_ys,
+                    ph_zs,
+                    ph_atom_types,
+                    mol_offsets,
+                    mol_atom_counts,
+                    scatter_idxs,
+                    atom_counts
+                )
 
-        FEATURE_SIZE = 384
+                FEATURE_SIZE = 384
 
-        f0, f1, f2, f3 = tf.reshape(f0, (-1, FEATURE_SIZE)), tf.reshape(f1, (-1, FEATURE_SIZE)), tf.reshape(f2, (-1, FEATURE_SIZE)), tf.reshape(f3, (-1, FEATURE_SIZE))
-    
-        scattered_features = tf.concat([f0, f1, f2, f3], axis=0)
-        features = tf.gather(scattered_features, gather_idxs)
+                f0, f1, f2, f3 = tf.reshape(f0, (-1, FEATURE_SIZE)), tf.reshape(f1, (-1, FEATURE_SIZE)), tf.reshape(f2, (-1, FEATURE_SIZE)), tf.reshape(f3, (-1, FEATURE_SIZE))
             
-        obtained_features = self.sess.run(features, feed_dict={
-            ph_xs: x,
-            ph_ys: y,
-            ph_zs: z,
-            ph_mol_idxs: mol_idxs,
-            ph_atom_types: atom_types
-        })
-
-        expected_features_mol1 = self.reference_feats(atom_matrix[:8, :])
-        expected_features_mol2 = self.reference_feats(atom_matrix[8:, :])
-
-        # radial components
-        np.testing.assert_almost_equal(obtained_features[:8, :64], expected_features_mol1[:, :64], decimal=6)
-        np.testing.assert_almost_equal(obtained_features[8:, :64], expected_features_mol2[:, :64], decimal=6)
-
-        # angular components
-        np.testing.assert_almost_equal(obtained_features[:8, 64:], expected_features_mol1[:, 64:], decimal=6)
-        np.testing.assert_almost_equal(obtained_features[8:, 64:], expected_features_mol2[:, 64:], decimal=6)
-
-
-        # test charges
-        ph_qs = tf.placeholder(dtype=tf.float32);
-
-        charge_energy = ani_mod.ani_charge(
-            ph_xs,
-            ph_ys,
-            ph_zs,
-            ph_qs,
-            mol_offsets,
-            mol_atom_counts
-        )
-
-        with self.sess:
-
-            ph_t = tf.placeholder(dtype=tf.float32)
-
-            E = tf.multiply(features, ph_t)
-
-            t = np.random.rand(1, 384)
-            forces_x = tf.gradients(E, [ph_xs])[0]
-            force_loss = tf.reduce_sum(forces_x)
-
-            error = tf.test.compute_gradient_error(
-                ph_t,
-                (1, 384),
-                force_loss,
-                (1,),
-                x_init_value=t,
-                delta=0.01,
-                extra_feed_dict={
+                scattered_features = tf.concat([f0, f1, f2, f3], axis=0)
+                features = tf.gather(scattered_features, gather_idxs)
+                    
+                obtained_features = self.sess.run(features, feed_dict={
                     ph_xs: x,
                     ph_ys: y,
                     ph_zs: z,
                     ph_mol_idxs: mol_idxs,
                     ph_atom_types: atom_types
-                }
-            )
+                })
 
-            assert error < 0.003
+                expected_features_mol1 = self.reference_feats(atom_matrix[:8, :])
+                np.testing.assert_almost_equal(obtained_features[:8, :64], expected_features_mol1[:, :64], decimal=6)
+                expected_features_mol2 = self.reference_feats(atom_matrix[8:, :])
+                np.testing.assert_almost_equal(obtained_features[8:, :64], expected_features_mol2[:, :64], decimal=6)
 
-        with self.sess:
-
-            qs = np.array([
-                0.3,
-                4.5,
-                2.2,
-                3.4,
-                -5.6,
-                3.4,
-                1.1,
-                3.2,
-
-                1.0,
-                0.3,
-                2.4], dtype=np.float32)
+                # angular components
+                np.testing.assert_almost_equal(obtained_features[:8, 64:], expected_features_mol1[:, 64:], decimal=6)
+                np.testing.assert_almost_equal(obtained_features[8:, 64:], expected_features_mol2[:, 64:], decimal=6)
 
 
-            # test dL/dq
-            error = tf.test.compute_gradient_error(
-                ph_qs,
-                (11,),
-                charge_energy,
-                (2,),
-                x_init_value=qs,
-                delta=0.01,
-                extra_feed_dict={
+
+
+
+                if prec == tf.float32:
+                    delta = 1e-3
+                    tol = 2e-3
+                elif prec == tf.float64:
+                    delta = 1e-3
+                    tol = 1e-11
+                else:
+                    raise Exception("Unknown precision")
+
+                # some parameter set
+                ph_t = tf.placeholder(dtype=prec)
+
+                E = tf.multiply(features, ph_t)
+
+                # random set of parameters
+                # np.random.seed(seed=1)
+                t = np.random.rand(1, 384)
+                forces_x = tf.gradients(E, [ph_xs])[0]
+                force_loss = tf.reduce_sum(forces_x)
+                debug_grad = tf.gradients(force_loss, ph_t)
+
+                res = self.sess.run(debug_grad, feed_dict={
+                    ph_xs: x,
+                    ph_ys: y,
+                    ph_zs: z,
+                    ph_mol_idxs: mol_idxs,
+                    ph_atom_types: atom_types,
+                    ph_t: t
+                })
+
+                error = tf.test.compute_gradient_error(
+                    ph_t,
+                    (1, 384),
+                    force_loss,
+                    (1,),
+                    x_init_value=t,
+                    delta=delta,
+                    extra_feed_dict={
+                        ph_xs: x,
+                        ph_ys: y,
+                        ph_zs: z,
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types
+                    }
+                )
+
+                print(prec, "ddx", error, tol)
+                assert error < tol
+
+
+                if prec == tf.float32:
+                    delta = 1e-3
+                    tol = 2e-3
+                elif prec == tf.float64:
+                    delta = 1e-3
+                    tol = 1e-11
+                else:
+                    raise Exception("Unknown precision")
+
+                # test charges
+                ph_qs = tf.placeholder(dtype=prec);
+
+                charge_energy = ani_mod.ani_charge(
+                    ph_xs,
+                    ph_ys,
+                    ph_zs,
+                    ph_qs,
+                    mol_offsets,
+                    mol_atom_counts
+                )
+
+
+                # with self.sess:
+                qs = np.array([
+                    0.3,
+                    4.5,
+                    2.2,
+                    3.4,
+                    -5.6,
+                    3.4,
+                    1.1,
+                    3.2,
+
+                    1.0,
+                    0.3,
+                    2.4], dtype=prec.as_numpy_dtype)
+
+
+                # test dL/dq
+                error = tf.test.compute_gradient_error(
+                    ph_qs,
+                    (11,),
+                    charge_energy,
+                    (2,),
+                    x_init_value=qs,
+                    delta=delta,
+                    extra_feed_dict={
+                        ph_xs: x,
+                        ph_ys: y,
+                        ph_zs: z,
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types
+                    }
+                )
+
+                print(prec, "dq", error, tol)
+                assert error < tol
+
+
+                # test featurization
+                grad_op = tf.gradients(f0, [ph_xs, ph_ys, ph_zs])
+
+                grads = self.sess.run(grad_op, feed_dict={
                     ph_xs: x,
                     ph_ys: y,
                     ph_zs: z,
                     ph_mol_idxs: mol_idxs,
                     ph_atom_types: atom_types
-                }
-            )
+                })
 
-            assert error < 0.003
+                if prec == tf.float32:
+                    delta = 1e-3
+                    tol = 1e-3
+                elif prec == tf.float64:
+                    delta = 1e-6
+                    tol = 1e-9
+                else:
+                    raise Exception("Unknown precision")
 
+                error = tf.test.compute_gradient_error(
+                    ph_xs,
+                    x.shape,
+                    features,
+                    (11, FEATURE_SIZE),
+                    x_init_value=x,
+                    delta=delta,
+                    extra_feed_dict={
+                        ph_ys: y,
+                        ph_zs: z,
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types
+                    }
+                )
 
-            # test featurization
-            grad_op = tf.gradients(f0, [ph_xs, ph_ys, ph_zs])
-
-            grads = self.sess.run(grad_op, feed_dict={
-                ph_xs: x,
-                ph_ys: y,
-                ph_zs: z,
-                ph_mol_idxs: mol_idxs,
-                ph_atom_types: atom_types
-            })
-
-            error = tf.test.compute_gradient_error(
-                ph_xs,
-                x.shape,
-                features,
-                (11, FEATURE_SIZE),
-                x_init_value=x,
-                delta=0.01,
-                extra_feed_dict={
-                    ph_ys: y,
-                    ph_zs: z,
-                    ph_mol_idxs: mol_idxs,
-                    ph_atom_types: atom_types
-                }
-            )
-
-            assert error < 0.003
+                print(prec, "dx", error, tol)
+                assert error < tol
 
 
-            error = tf.test.compute_gradient_error(
-                ph_ys,
-                y.shape,
-                features,
-                (11, FEATURE_SIZE),
-                x_init_value=y,
-                delta=0.01,
-                extra_feed_dict={
-                    ph_xs: x,
-                    ph_zs: z,
-                    ph_mol_idxs: mol_idxs,
-                    ph_atom_types: atom_types
-                }
-            )
+                error = tf.test.compute_gradient_error(
+                    ph_ys,
+                    y.shape,
+                    features,
+                    (11, FEATURE_SIZE),
+                    x_init_value=y,
+                    delta=delta,
+                    extra_feed_dict={
+                        ph_xs: x,
+                        ph_zs: z,
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types
+                    }
+                )
 
-            assert error < 0.003
+                print(prec, "dy", error, tol)
+                assert error < tol
 
-            error = tf.test.compute_gradient_error(
-                ph_zs,
-                z.shape,
-                features,
-                (11, FEATURE_SIZE),
-                x_init_value=z,
-                delta=0.01,
-                extra_feed_dict={
-                    ph_xs: x,
-                    ph_ys: y,
-                    ph_mol_idxs: mol_idxs,
-                    ph_atom_types: atom_types
-                }
-            )
+                error = tf.test.compute_gradient_error(
+                    ph_zs,
+                    z.shape,
+                    features,
+                    (11, FEATURE_SIZE),
+                    x_init_value=z,
+                    delta=delta,
+                    extra_feed_dict={
+                        ph_xs: x,
+                        ph_ys: y,
+                        ph_mol_idxs: mol_idxs,
+                        ph_atom_types: atom_types
+                    }
+                )
 
-            assert error < 0.003
+                print(prec, "dz", error, tol)
+                assert error < tol
 
 
 

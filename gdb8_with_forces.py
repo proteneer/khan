@@ -81,6 +81,7 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
+            precision=tf.float32,
             layer_sizes=(128, 128, 64, 1),
             # fit_charges=True,
         )
