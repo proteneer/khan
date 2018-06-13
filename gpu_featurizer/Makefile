@@ -22,34 +22,34 @@ ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op_gpu.o ani_so
 ani_cpu: functor_op_cpu.o kernel_cpu.o ani_op_cpu.o ani_sort.o ani_charges.o
 	$(CC) -shared -o ani_cpu.so functor_op_cpu.o kernel_cpu.o ani_charges.o ani_op_cpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
-ani_charges_gpu.o: ani_charges_gpu.cu parameters.h numeric_helpers.h
+ani_charges_gpu.o: ani_charges_gpu.cu parameters.h
 	$(NVCC) ani_charges_gpu.cu -c $(NVCC_FLAGS)
 
-functor_op_gpu.o: functor_op_gpu.cu functor_op.h parameters.h numeric_helpers.h kernel.cuh
+functor_op_gpu.o: functor_op_gpu.cu functor_op.h parameters.h kernel.cuh
 	$(NVCC) functor_op_gpu.cu -c $(NVCC_FLAGS)
 
-kernel.o: kernel.cu parameters.h numeric_helpers.h
+kernel.o: kernel.cu parameters.h
 	$(NVCC) kernel.cu -c $(NVCC_FLAGS)
 
-kernel_cpu.o: kernel_cpu.cpp parameters.h numeric_helpers.h
+kernel_cpu.o: kernel_cpu.cpp parameters.h
 	$(CC) kernel_cpu.cpp -c $(CC_FLAGS)
 
-functor_op_cpu.o: functor_op_cpu.cpp functor_op.h parameters.h numeric_helpers.h kernel_cpu.h
+functor_op_cpu.o: functor_op_cpu.cpp functor_op.h parameters.h kernel_cpu.h
 	$(CC) functor_op_cpu.cpp -c $(CC_FLAGS)
 
-ani_op_gpu.o: ani_op.cpp functor_op.h parameters.h numeric_helpers.h
+ani_op_gpu.o: ani_op.cpp functor_op.h parameters.h
 	$(CC) -o ani_op_gpu.o ani_op.cpp -D ANI_GPU -c $(CC_FLAGS)
 
-ani_op_cpu.o: ani_op.cpp functor_op.h parameters.h numeric_helpers.h
+ani_op_cpu.o: ani_op.cpp functor_op.h parameters.h
 	$(CC) -o ani_op_cpu.o ani_op.cpp -c $(CC_FLAGS)
 
 ani_sort.o: ani_sort.cpp
 	$(CC) ani_sort.cpp -c $(CC_FLAGS)
 
-ani_charges.o: ani_charges.cpp parameters.h numeric_helpers.h
+ani_charges.o: ani_charges.cpp parameters.h
 	$(CC) ani_charges.cpp -c $(CC_FLAGS)
 
-# numeric_helpers.o: numeric_helpers.h numeric_helpers.cpp
+# numeric_helpers.o: numeric_helpers.cpp
 	# $(CC) numeric_helpers.cpp -c $(CC_FLAGS)
 
 clean:
