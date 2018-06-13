@@ -37,7 +37,8 @@ def main():
     ANI_TRAIN_DIR = args.train_dir
     ANI_WORK_DIR = args.work_dir
 
-    save_dir = os.path.join(ANI_WORK_DIR, "save")
+    # save_dir = os.path.join(ANI_WORK_DIR, "save")
+    save_file = os.path.join(ANI_WORK_DIR, "save_file.npz")
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
@@ -70,18 +71,19 @@ def main():
         else:
             towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
 
-        print("towers:", towers)
+        print("--towers:", towers)
 
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
+            precision=tf.float64,
             layer_sizes=(128, 128, 64, 1),
-            fit_charges=True
+            fit_charges=False,
         )
 
-        if os.path.exists(save_dir):
-            print("Restoring existing model from", save_dir)
-            trainer.load(save_dir)
+        if os.path.exists(save_file):
+            print("Restoring existing model from", save_file)
+            trainer.load_numpy(save_file)
         else:
             trainer.initialize() # initialize to random variables
 
@@ -97,16 +99,10 @@ def main():
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
-        # Uncomment if you'd like gradients for a dataset
-        all_shapes = []
-        for feat in trainer.featurize(rd_test):
-            all_shapes.append(feat)
-        assert len(all_shapes) == rd_test.num_mols()
-
-        all_grads = []
-        for grad in trainer.coordinate_gradients(rd_test):
-            all_grads.append(grad)
-        assert len(all_grads) == rd_test.num_mols()
+        # all_grads = []
+        # for grad in trainer.coordinate_gradients(rd_test):
+        #     all_grads.append(grad)
+        # assert len(all_grads) == rd_test.num_mols()
 
         print("------------Starting Training--------------")
 
@@ -137,7 +133,6 @@ def main():
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 if test_abs_rmse < best_test_score:
-                    trainer.save_best_params()
                     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
                     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
 
@@ -146,7 +141,7 @@ def main():
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
-                trainer.save(save_dir)
+                trainer.save_numpy(save_file)
 
                 print('', end='\n')
 

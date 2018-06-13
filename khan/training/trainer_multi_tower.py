@@ -100,6 +100,7 @@ def _ani_charge_grad(op, grads):
 
     Returns:
         Gradients with respect to the input of `ani_charge`.
+
     """
     global ani_mod
     assert ani_mod is not None
@@ -175,9 +176,9 @@ class TrainerMultiTower():
     def __init__(self,
         sess,
         towers,
+        precision,
         layer_sizes=(128, 128, 64, 8, 1),
-        fit_charges=False,
-        # fit_forces=False,
+        fit_charges=False
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -194,27 +195,34 @@ class TrainerMultiTower():
         fit_charges: bool
             Whether or not we fit partial charges
 
+        precision: tf.dtype
+            Should be either tf.float32 or tf.float64        
+
+
         """
         self.towers = towers
         self.num_towers = len(towers)
 
+        assert fit_charges is False
+        assert (precision is tf.float32) or (precision is tf.float64)
         assert self.num_towers > 0
+        self.precision = precision
 
-        self.x_enq = tf.placeholder(dtype=tf.float32)
-        self.y_enq = tf.placeholder(dtype=tf.float32)
-        self.z_enq = tf.placeholder(dtype=tf.float32)
+        self.x_enq = tf.placeholder(dtype=precision)
+        self.y_enq = tf.placeholder(dtype=precision)
+        self.z_enq = tf.placeholder(dtype=precision)
         self.a_enq = tf.placeholder(dtype=tf.int32)
         self.m_enq = tf.placeholder(dtype=tf.int32)
-        self.yt_enq = tf.placeholder(dtype=tf.float32)
+        self.yt_enq = tf.placeholder(dtype=precision)
         self.bi_enq = tf.placeholder(dtype=tf.int32)
 
         dtypes=[
-            tf.float32,  # Xs
-            tf.float32,  # Ys
-            tf.float32,  # Zs
+            precision,  # Xs
+            precision,  # Ys
+            precision,  # Zs
             tf.int32,    # As
             tf.int32,    # mol ids
-            tf.float32,  # Y TRUEss
+            precision,  # Y TRUEss
             tf.int32,    # b_idxs
         ]
 
@@ -229,10 +237,10 @@ class TrainerMultiTower():
         ]
 
         # force fitting
-        self.force_enq_x = tf.placeholder(dtype=tf.float32, name="dx") # (batch_size, 1)
-        self.force_enq_y = tf.placeholder(dtype=tf.float32, name="dy") # (batch_size, 1)
-        self.force_enq_z = tf.placeholder(dtype=tf.float32, name="dz") # (batch_size, 1)
-        dtypes.extend([tf.float32, tf.float32, tf.float32])
+        self.force_enq_x = tf.placeholder(dtype=precision, name="dx") # (batch_size, 1)
+        self.force_enq_y = tf.placeholder(dtype=precision, name="dy") # (batch_size, 1)
+        self.force_enq_z = tf.placeholder(dtype=precision, name="dz") # (batch_size, 1)
+        dtypes.extend([precision, precision, precision])
         qtypes.extend([self.force_enq_x, self.force_enq_y, self.force_enq_z])
 
         queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=dtypes);
@@ -241,9 +249,11 @@ class TrainerMultiTower():
 
         self.sess = sess
 
+        self.non_trainable_variables = []
+
         with tf.device('/cpu:0'):
 
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(1e-4), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
             self.optimizer = tf.train.AdamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -257,6 +267,8 @@ class TrainerMultiTower():
             self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
             self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
             self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
+
+            # self.non_trainable_variables.extend([self.learning_rate, self.global_step, self.global_epoch_count, self.local_epoch_count])
 
             # these data elements are unordered since the gpu grabs the batches in different orders
             self.tower_grads = [] # average is order invariant
@@ -319,6 +331,7 @@ class TrainerMultiTower():
 
                             tower_model_near = MoleculeNN(
                                 type_map=["H", "C", "N", "O"],
+                                precision=precision,
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
                                 layer_sizes=(feat_size,) + layer_sizes,
@@ -337,6 +350,7 @@ class TrainerMultiTower():
                                     atom_type_features=[f0, f1, f2, f3],
                                     gather_idxs=gather_idxs,
                                     layer_sizes=(feat_size,) + layer_sizes,
+                                    precision=precision,
                                     prefix="charge_")
 
                                 if tower_idx == 0:
@@ -348,10 +362,10 @@ class TrainerMultiTower():
                                 # (ytz + stevenso): we want to normalize the compute the charge per molecule
                                 # note that this only works for *neutral* molecules. For molecules that have a formal charge
                                 # we want to specify correct differently, or turn off the normalization entirely.
-                                tower_charges_per_mol = tf.segment_sum(tower_charges, m_deq) # per molecule charge
-                                tower_charges_per_mol = tf.divide(tower_charges_per_mol, tf.cast(mol_atom_counts, dtype=tf.float32)) # per molecule avg charge
-                                tower_charge_correction = tf.gather(tower_charges_per_mol, m_deq) # generate the per atom correction
-                                tower_charges = tf.subtract(tower_charges, tower_charge_correction) # zero out the charge
+                                # tower_charges_per_mol = tf.segment_sum(tower_charges, m_deq) # per molecule charge
+                                # tower_charges_per_mol = tf.divide(tower_charges_per_mol, tf.cast(mol_atom_counts, dtype=precision)) # per molecule avg charge
+                                # tower_charge_correction = tf.gather(tower_charges_per_mol, m_deq) # generate the per atom correction
+                                # tower_charges = tf.subtract(tower_charges, tower_charge_correction) # zero out the charge
 
                                 tower_far_energy = ani_mod.ani_charge(
                                     x_deq,
@@ -395,6 +409,7 @@ class TrainerMultiTower():
                             tower_force_rmse = dx_l2 + dy_l2 + dz_l2
                             self.tower_force_rmses.append(tower_force_rmse)
                             tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
+
                             tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
                             self.tower_force_grads.append(tower_force_grad)
 
@@ -402,15 +417,15 @@ class TrainerMultiTower():
             self.save_best_params_ops = []
             self.load_best_params_ops = []
 
-            for var in self.parameters:
-                copy_name = "best_"+var.name.split(":")[0]
+            # for var in self.parameters:
+            #     copy_name = "best_"+var.name.split(":")[0]
 
-                copy_shape = var.shape
-                copy_type = var.dtype
-                var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
-                self.best_params.append(var_copy)
-                self.save_best_params_ops.append(tf.assign(var_copy, var))
-                self.load_best_params_ops.append(tf.assign(var, var_copy))
+            #     copy_shape = var.shape
+            #     copy_type = var.dtype
+            #     var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
+            #     self.best_params.append(var_copy)
+            #     self.save_best_params_ops.append(tf.assign(var_copy, var))
+            #     self.load_best_params_ops.append(tf.assign(var, var_copy))
 
             def tower_grads(grads):
                 apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
@@ -444,19 +459,69 @@ class TrainerMultiTower():
 
     def save_best_params(self):
         """
-        Copy the current model's trainable parameters as the best so far.
+        (DEPRECATED) Copy the current model's trainable parameters as the best so far.
         """
         self.sess.run(self.save_best_params_ops)
 
     def load_best_params(self):
         """
-        Restore the current model's parameters from the best found so far.
+        (DEPCREATED) Restore the current model's parameters from the best found so far.
         """
         self.sess.run(self.load_best_params_ops)
 
+    def save_numpy(self, npz_file):
+        """
+        Save the parameters into a numpy npz. For the sake of consistency, we require that
+        the npz_file ends in .npz
+
+        .. note:: This saves the entire state of all variables (including non-trainable ones
+            like the learning rate, etc.)
+
+        Parameters
+        ----------
+        npz_file: str
+            filename to save under. Must end in .npz
+
+        """
+        _, file_ext = os.path.splitext(npz_file)
+        assert file_ext == ".npz"
+        save_objs = {}
+        all_vars = tf.global_variables()
+        for var, val in zip(all_vars, self.sess.run(all_vars)):
+            save_objs[var.name] = val
+        np.savez(npz_file, **save_objs)
+
+    def load_numpy(self, npz_file, strict=True):
+        """
+        Load a numpy checkpoint file.
+
+        Parameters
+        ----------
+        npz_file: str
+            filename to load
+
+        strict: bool (optional)
+            Whether or not we allow type conversions. By default
+            this is set to True. If you're converting a 64 bit checkpoint file
+            into lossy 32bit (and vice versa), you can set strict to False to enable the conversion
+            automatically.
+
+        """
+        objs = np.load(npz_file, allow_pickle=False)
+        assign_ops = []
+        for k in objs.keys():
+            tfo = self.sess.graph.get_tensor_by_name(k)
+            npa = objs[k]
+            if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
+                msg = "Cannot deserialize " + str(tfo.dtype.as_numpy_dtype) + " into " + str(npa.dtype)
+                msg += ". You may want to set strict=False."
+                raise TypeError(msg)
+            assign_ops.append(tf.assign(tfo, objs[k].astype(tfo.dtype.as_numpy_dtype)))
+        self.sess.run(assign_ops)
+
     def save(self, save_dir):
         """
-        Save the entire model to a given directory.
+        (DEPRECATED) Save the entire model to a given directory.
 
         Parameters
         ----------
@@ -472,7 +537,7 @@ class TrainerMultiTower():
 
     def load(self, save_dir):
         """
-        Load an existing model from an existing directory and initialize
+        (DEPRECATED) Load an existing model from an existing directory and initialize
         the trainer's Session variables.
 
         Parameters
@@ -569,6 +634,9 @@ class TrainerMultiTower():
         list of np.ndarray
             Returns a list of numpy array corresponding to the features
             of each molecule in the dataset.
+
+        .. note:: This should be used for investigative/debug purposes only. This returns tensors that are
+            extremely large in size (hint: 600GB if iterating over gdb8 dataset)
 
         """
 
@@ -700,9 +768,9 @@ class TrainerMultiTower():
                         feed_dict[self.force_enq_z] = mol_grads[:, 2]
                     else:
                         num_mols = mol_xs.shape[0]
-                        feed_dict[self.force_enq_x] = np.zeros((num_mols, 0), dtype=np.float32)
-                        feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=np.float32)
-                        feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=np.float32)
+                        feed_dict[self.force_enq_x] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
+                        feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
+                        feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
 
                     self.sess.run(self.put_op, feed_dict=feed_dict)
 
@@ -716,9 +784,9 @@ class TrainerMultiTower():
                             self.sess.run(before_hooks)
 
                         feed_dict = {
-                            self.x_enq: np.zeros((0, 1), dtype=np.float32),
-                            self.y_enq: np.zeros((0, 1), dtype=np.float32),
-                            self.z_enq: np.zeros((0, 1), dtype=np.float32),
+                            self.x_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
+                            self.y_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
+                            self.z_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
                             self.a_enq: np.zeros((0,), dtype=np.int32),
                             self.m_enq: np.zeros((0,), dtype=np.int32),
                             self.yt_enq: np.zeros((0,)),
@@ -726,9 +794,9 @@ class TrainerMultiTower():
                         }
 
                         # if mol_grads is not None:
-                        feed_dict[self.force_enq_x] = np.zeros((0, 1), dtype=np.float32)
-                        feed_dict[self.force_enq_y] = np.zeros((0, 1), dtype=np.float32)
-                        feed_dict[self.force_enq_z] = np.zeros((0, 1), dtype=np.float32)
+                        feed_dict[self.force_enq_x] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
+                        feed_dict[self.force_enq_y] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
+                        feed_dict[self.force_enq_z] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
 
                         self.sess.run(self.put_op, feed_dict=feed_dict)
                         b_idx += 1

@@ -8,104 +8,150 @@ using namespace tensorflow;
 
 using CPUDevice = Eigen::ThreadPoolDevice;
 
-template<>
-void AniFunctor<CPUDevice>::operator()(
-    const CPUDevice& d,
-    const float *Xs,
-    const float *Ys,
-    const float *Zs,
-    const int *atomic_nums,
-    const int *mol_offsets,
-    const int *mol_atom_count,
-    const int num_mols, // actually equal to blockDim.x
-    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-    float *X_feat_out_H,
-    float *X_feat_out_C,
-    float *X_feat_out_N,
-    float *X_feat_out_O,
-    const int *acs) {
+// template specialization
+// template<typename NumericType>
+// struct AniFunctor<CPUDevice, NumericType> {
+//     void operator()(
+//     const CPUDevice& d,
+//     const NumericType *Xs,
+//     const NumericType *Ys,
+//     const NumericType *Zs,
+//     const int *atomic_nums,
+//     const int *mol_offsets,
+//     const int *mol_atom_count,
+//     const int num_mols, // actually equal to blockDim.x
+//     const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+//     NumericType *X_feat_out_H,
+//     NumericType *X_feat_out_C,
+//     NumericType *X_feat_out_N,
+//     NumericType *X_feat_out_O,
+//     const int *acs);
+// };
 
-    memset(X_feat_out_H, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(X_feat_out_C, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(X_feat_out_N, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(X_feat_out_O, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int));
+// template<typename NumericType>
+// struct AniFunctor<CPUDevice, NumericType> {
+//     void operator()(
+//         const CPUDevice& d,
+//         const NumericType *Xs,
+//         const NumericType *Ys,
+//         const NumericType *Zs,
+//         const int *atomic_nums,
+//         const int *mol_offsets,
+//         const int *mol_atom_count,
+//         const int num_mols, // actually equal to blockDim.x
+//         const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+//         NumericType *X_feat_out_H_dbl,
+//         NumericType *X_feat_out_C_dbl,
+//         NumericType *X_feat_out_N_dbl,
+//         NumericType *X_feat_out_O_dbl,
+//         const int *acs) {
 
-    featurize_cpu(
-      Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-      X_feat_out_H, X_feat_out_C, X_feat_out_N, X_feat_out_O);
+//         memset(X_feat_out_H_dbl, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
+//         memset(X_feat_out_C_dbl, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
+//         memset(X_feat_out_N_dbl, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
+//         memset(X_feat_out_O_dbl, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
 
-};
+//         featurize_cpu<NumericType>(
+//           Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
+//           X_feat_out_H_dbl, X_feat_out_C_dbl, X_feat_out_N_dbl, X_feat_out_O_dbl);
+//     }
+// };
 
-template struct AniFunctor<CPUDevice>;
+// template specialization
+// template <typename NumericType>
+// struct AniGrad<CPUDevice, NumericType> {
+//   void operator()(
+//     const CPUDevice& d,
+//     const NumericType *Xs,
+//     const NumericType *Ys,
+//     const NumericType *Zs,
+//     const int *atomic_nums,
+//     const int *mol_offsets,
+//     const int *mol_atom_count,
+//     const int num_mols, // actually equal to blockDim.x
+//     const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+//     const NumericType *input_H_grads,
+//     const NumericType *input_C_grads,
+//     const NumericType *input_N_grads,
+//     const NumericType *input_O_grads,
+//     NumericType *X_grads,
+//     NumericType *Y_grads,
+//     NumericType *Z_grads,
+//     const int *acs);
+// };
 
-template<>
-void AniGrad<CPUDevice>::operator()(
-    const CPUDevice& d,
-    const float *Xs,
-    const float *Ys,
-    const float *Zs,
-    const int *atomic_nums,
-    const int *mol_offsets,
-    const int *mol_atom_count,
-    const int num_mols, // actually equal to blockDim.x
-    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-    const float *input_H_grads,
-    const float *input_C_grads,
-    const float *input_N_grads,
-    const float *input_O_grads,
-    float *X_grads,
-    float *Y_grads,
-    float *Z_grads,
-    const int *acs
-    ) {
 
-    const int total_num_atoms = acs[0] + acs[1] + acs[2] + acs[3];
 
-    memset(X_grads, 0, total_num_atoms*sizeof(float));
-    memset(Y_grads, 0, total_num_atoms*sizeof(float));
-    memset(Z_grads, 0, total_num_atoms*sizeof(float));
+// template<typename NumericType>
+// struct AniGrad<CPUDevice, NumericType> {
+//     void operator()(
+//         const CPUDevice& d,
+//         const NumericType *Xs,
+//         const NumericType *Ys,
+//         const NumericType *Zs,
+//         const int *atomic_nums,
+//         const int *mol_offsets,
+//         const int *mol_atom_count,
+//         const int num_mols, // actually equal to blockDim.x
+//         const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+//         const NumericType *input_H_grads,
+//         const NumericType *input_C_grads,
+//         const NumericType *input_N_grads,
+//         const NumericType *input_O_grads,
+//         NumericType *X_grads_dbl,
+//         NumericType *Y_grads_dbl,
+//         NumericType *Z_grads_dbl,
+//         const int *acs
+//         ) {
 
-    featurize_grad_cpu(
-      Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-      input_H_grads, input_C_grads, input_N_grads, input_O_grads,
-      X_grads, Y_grads, Z_grads
-    );
+//         const int total_num_atoms = acs[0] + acs[1] + acs[2] + acs[3];
 
-};
+//         memset(X_grads_dbl, 0, total_num_atoms*sizeof(NumericType));
+//         memset(Y_grads_dbl, 0, total_num_atoms*sizeof(NumericType));
+//         memset(Z_grads_dbl, 0, total_num_atoms*sizeof(NumericType));
 
-template struct AniGrad<CPUDevice>;
+//         featurize_grad_cpu<NumericType>(
+//           Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
+//           input_H_grads, input_C_grads, input_N_grads, input_O_grads,
+//           X_grads_dbl, Y_grads_dbl, Z_grads_dbl
+//         );
+//     }
 
-template<>
-void AniGradInverse<CPUDevice>::operator()(
-    const CPUDevice& d,
-    const float *Xs,
-    const float *Ys,
-    const float *Zs,
-    const int *atomic_nums,
-    const int *mol_offsets,
-    const int *mol_atom_count,
-    const int num_mols, // actually equal to blockDim.x
-    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-    const float *X_grads,
-    const float *Y_grads,
-    const float *Z_grads,
-    float *output_H_grads,
-    float *output_C_grads,
-    float *output_N_grads,
-    float *output_O_grads,
-    const int *acs
-    ) {
+// };
 
-    memset(output_H_grads, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_C_grads, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_N_grads, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int));
-    memset(output_O_grads, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int));
+// template struct AniGrad<CPUDevice>;
 
-    featurize_grad_inverse(
-      Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-      X_grads, Y_grads, Z_grads,
-      output_H_grads, output_C_grads, output_N_grads, output_O_grads);
+// template<>
+// void AniGradInverse<CPUDevice>::operator()(
+//     const CPUDevice& d,
+//     const float *Xs,
+//     const float *Ys,
+//     const float *Zs,
+//     const int *atomic_nums,
+//     const int *mol_offsets,
+//     const int *mol_atom_count,
+//     const int num_mols, // actually equal to blockDim.x
+//     const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+//     const float *X_grads,
+//     const float *Y_grads,
+//     const float *Z_grads,
+//     float *output_H_grads,
+//     float *output_C_grads,
+//     float *output_N_grads,
+//     float *output_O_grads,
+//     const int *acs
+//     ) {
 
-};
+//     memset(output_H_grads, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int));
+//     memset(output_C_grads, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int));
+//     memset(output_N_grads, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int));
+//     memset(output_O_grads, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int));
 
-template struct AniGradInverse<CPUDevice>;
+//     featurize_grad_inverse(
+//       Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
+//       X_grads, Y_grads, Z_grads,
+//       output_H_grads, output_C_grads, output_N_grads, output_O_grads);
+
+// };
+
+// template struct AniGradInverse<CPUDevice>;

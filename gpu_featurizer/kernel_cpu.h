@@ -3,53 +3,56 @@
 
 #include "parameters.h"
 
+template<typename NumericType>
 void featurize_cpu(
-    const float *input_Xs,
-    const float *input_Ys,
-    const float *input_Zs,
+    const NumericType *input_Xs,
+    const NumericType *input_Ys,
+    const NumericType *input_Zs,
     const int *input_As,
     const int *input_MOs,
     const int *input_MACs,
     const int num_mols,
     const int *input_SIs,
-    float *X_feat_Hs,
-    float *X_feat_Cs,
-    float *X_feat_Ns,
-    float *X_feat_Os);
+    NumericType *X_feat_Hs,
+    NumericType *X_feat_Cs,
+    NumericType *X_feat_Ns,
+    NumericType *X_feat_Os);
 
+template<typename NumericType>
 void featurize_grad_cpu(
-    const float *input_Xs,
-    const float *input_Ys,
-    const float *input_Zs,
+    const NumericType *input_Xs,
+    const NumericType *input_Ys,
+    const NumericType *input_Zs,
     const int *input_As,
     const int *mol_offsets,
     const int *input_MACs,
     const int n_mols, // denotes where the atom is being displaced to
     const int *input_SIs,
-    const float *H_grads,
-    const float *C_grads,
-    const float *N_grads,
-    const float *O_grads,
-    float *X_grads,
-    float *Y_grads,
-    float *Z_grads);
+    const NumericType *H_grads,
+    const NumericType *C_grads,
+    const NumericType *N_grads,
+    const NumericType *O_grads,
+    NumericType *X_grads,
+    NumericType *Y_grads,
+    NumericType *Z_grads);
 
+template<typename NumericType>
 void featurize_grad_inverse(
-    const float *input_Xs,
-    const float *input_Ys,
-    const float *input_Zs,
+    const NumericType *input_Xs,
+    const NumericType *input_Ys,
+    const NumericType *input_Zs,
     const int *input_As,
     const int *mol_offsets,
     const int *input_MACs,
     const int n_mols, // denotes where the atom is being displaced to
     const int *scatter_idxs, // used to retrieve the grad multiplication factor for backprop
-    const float *X_grads,
-    const float *Y_grads,
-    const float *Z_grads, 
+    const NumericType *X_grads,
+    const NumericType *Y_grads,
+    const NumericType *Z_grads, 
 
-    float *H_grads,
-    float *C_grads,
-    float *N_grads,
-    float *O_grads);
+    NumericType *H_grads,
+    NumericType *C_grads,
+    NumericType *N_grads,
+    NumericType *O_grads);
 
 #endif
