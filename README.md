@@ -76,7 +76,7 @@ This will generate an ani.so file that includes both the sorting routing as well
 After downloading the gdb8 and gdb10 datasets in the following section, you can run the example code with:
 
 ``` bash
-python gdb8.py --train-dir ANI_DATA_DIR --work-dir /tmp/model/ --gpus  --ani
+python gdb8.py --train-dir ANI_DATA_DIR --work-dir /tmp/model/ --gpus  --ani-lib gpu_featurizer/ani.so
 ```
 
 The output should look something like:
