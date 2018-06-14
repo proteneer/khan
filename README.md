@@ -11,10 +11,12 @@ build procedures have been streamlined.
 ## Features
 
 1. A friendly tensorflow environment with custom ops for performance
-2. On-the-fly featurization
+2. On-the-fly GPU featurization 
 3. Simple to use python API for training
 4. Highly extensible with additional datasets
-5. Scalable to multiple gpus on a single node.
+5. Scalable to multiple gpus on a single node
+6. Ability to train to forces
+7. Double precision for precise optimization routines
 
 ## Performance
 
@@ -48,7 +50,8 @@ num_gpus = 8
 
 On 8x GTX-1080s Tis, we it takes on average about 56 seconds per epoch, or about 1542 epochs/day if doing
 pure training. A typical ANI-1 model with a scaled learning rate of 1e-3 to 1e-9 would take about ~2000
-epochs to converge.
+epochs to converge. However, while training on multi GPUs leads to faster epoch times, it may not necessarily
+lead to faster training time due to gradient averaging.
 
 ## Installation Procedures
 
@@ -73,7 +76,7 @@ This will generate an ani.so file that includes both the sorting routing as well
 After downloading the gdb8 and gdb10 datasets in the following section, you can run the example code with:
 
 ``` bash
-python gdb8.py --train-dir ANI_DATA_DIR --work-dir /tmp/model/ --gpus 3
+python gdb8.py --train-dir ANI_DATA_DIR --work-dir /tmp/model/ --gpus  --ani
 ```
 
 The output should look something like:
@@ -149,14 +152,15 @@ with tf.Session(config=config) as sess:
 
 ```
 
+For a more comprehensive example please refer to gdb8.py.
+
+
 ## Current limitations
 
-1. The maximum number of atoms for training is 32
-2. Changing the featurization requires writing some CUDA code.
-3. 4 atoms types (eg. H C N O)
-4. GPU-Only featurization for now (CPU WIP)
-5. Closed shell systems
-6. Single node training
+1. Changing the featurization requires a re-compile (edit gpu_featurizer/parameters.h)
+2. 4 atoms types (eg. H C N O)3
+3. Closed shell neutral species
+4. Single node training
 
 ## License
 

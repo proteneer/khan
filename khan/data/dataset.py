@@ -66,7 +66,7 @@ class RawDataset():
             ])  # mol1 forces
         ]
 
-        dataset = RawDataset(Xs, ys)
+        dataset = RawDataset(Xs, ys, gs)
 
         for xs, m_ids, ys, gs in dataset.iterate(2, batch_size=4, shuffle=True):
             print(xs) => mol1 then mol 0
