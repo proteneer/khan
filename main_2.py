@@ -125,15 +125,8 @@ def main():
         print("towers:", towers)
 
         #layer_sizes=(128, 128, 64, 1) # original
-        #layer_sizes=(256, 128, 64, 8, 1)
         layer_sizes=(256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1) # bigNN
         #layer_sizes=tuple( 20*[128] + [1] )
-        #layer_sizes=(128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1)
-        #layer_sizes=(64, 64, 64, 64, 8, 1)
-        #layer_sizes=(256, 256, 256, 256, 128, 64, 8, 1)
-        #layer_sizes=(256, 64, 64, 64, 32, 16, 8, 1)
-        #layer_sizes=(512, 256, 256, 256, 128, 64, 8, 1)
-        #layer_sizes=(1024, 64, 64, 64, 32, 16, 8, 1)
         #layer_sizes=(1,) # linear
         print('layer_sizes:', layer_sizes)
         n_weights = sum( [layer_sizes[i]*layer_sizes[i+1] for i in range(len(layer_sizes)-1)] )
@@ -146,12 +139,6 @@ def main():
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             Xs, ys = pickle.load( open(pickle_file, "rb") )
-            if False: # use with gdb8_graphdb_xy.pickle to refine dataset to harder subsets
-                differ1, differ2, differ3 = pickle.load( open('difference_subsets.pickle', "rb" ) )
-                differ3 = {i:True for i in differ3}
-                Xs = [X for i,X in enumerate(Xs) if i in differ3]
-                ys = [y for i,y in enumerate(ys) if i in differ3]
-                pickle.dump( (Xs, ys), open( 'gdb8_graphdb_xy_differ3.pickle', "wb" ) )
         else:
             ff_train_dirs = ROTAMER_TRAIN_DIR + [GRAPH_DB_TRAIN_DIR]
             Xs, ys = data_loader.load_gdb8(ANI_TRAIN_DIR, CALIBRATION_FILE_TRAIN, ff_train_dirs)
@@ -171,11 +158,6 @@ def main():
             fit_charges=args.fit_charges
             )
 
-        if False: # analyze features
-            for dataset in [rd_train, rd_test]:
-                for features in trainer.featurize(dataset, batch_size=1024):
-                    pass
-
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
             trainer.load(save_dir)
@@ -188,118 +170,17 @@ def main():
                 trainer.initialize() # initialize to random variables
                 test_err = trainer.eval_abs_rmse(rd_test)
                 print('Initial error from random weights: %.1f kcal/mol' % test_err )
-                #for wm in trainer._weight_matrices():
-                #    data = sess.run(wm)
-                #    print( wm.name, 'max', np.max(data), 'min', np.min(data) )
                 if test_err < best_error:
                     best_seed = attempt_count
                     best_error = test_err
             tf.set_random_seed(best_seed)
             trainer.initialize()
 
-        # more specific save/load functionality via numpy
-
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))
-        if False: # save these weights as numpy arrays in a file
-            print('Saving weight and bias values')
-            values = [sess.run(wm) for wm in trainer._weight_matrices()] + [sess.run(wm) for wm in trainer._biases()]
-            weights = [sess.run(wm) for wm in trainer._weight_matrices()]
-            biases = [sess.run(wm) for wm in trainer._biases()]
-            elements = ['H','C','N','O']
-            print({ el: w.flatten() for el,w in zip(elements,weights) })
-            print({ el: b.flatten() for el,b in zip(elements,biases) })
-            exit()
-            with open('saved.npy', 'wb') as outfile:
-                np.save(outfile, values)
-        if False: # load other weights from a file
-            print('Loading weight and bias values')
-            with open('saved.npy', 'rb') as infile:
-                load_values = np.load(infile)
-            Ws = [W for ann in trainer.all_models[0].anns for W in ann.Ws]
-            bs = [b for ann in trainer.all_models[0].anns for b in ann.bs]
-            load_targets = Ws + bs
-            #load_targets = trainer._weight_matrices()[:len(layer_sizes)] + trainer._biases()[:len(layer_sizes)] # only load main layer, not charge layer
-            for wm,values in zip( load_targets, load_values ):
-                sess.run( wm.assign( tf.convert_to_tensor(values, dtype=tf.float32) ) )
-                max1, max2 = np.max(values), np.max(sess.run(wm))
-                print(max1, max2)
-            print("Evaluating Rotamer Errors again:")
-            for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
-                print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups)))    
+            print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups))) 
 
-        training = False
-        committee = False
-        if training:
-            print("------------Starting Training--------------")
-            trainer.train(save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count)
-        elif committee: # run committee-based comparison of the dataset
-            dataset = RawDataset(Xs, ys)
-            testdirs = ['june5_3/save', 'june5_4/save', 'june5_5/save', 'june5_6/save']
-            preds = np.zeros((len(ys), len(testdirs)))
-            for testn, testdir in enumerate(testdirs):  
-                print('Predicting', testn, testdir)              
-                trainer.load(testdir)
-                trainer.load_best_params()                
-                ys_pred = trainer.predict(dataset)
-                preds[:,testn] = ys_pred
-            pred_variance = [ (max(preds[i]) - min(preds[i]), i) for i in range(len(ys)) ]
-            pred_variance.sort()
-            for i in range(20):
-                print( pred_variance[len(pred_variance)*i//20] )
-            print(pred_variance[-1])
-            print( len(pred_variance) )
-            differ1 = [n for var, n in pred_variance if var > 1/627.509] # differ by more than 1 kcal/mol
-            differ2 = [n for var, n in pred_variance if var > 2/627.509]
-            differ3 = [n for var, n in pred_variance if var > 3/627.509]
-            #pickle.dump( (differ1, differ2, differ3), open( 'difference_subsets.pickle', "wb" ) )
-            '''
-            (6.057322025299072e-06, 250552)
-            (0.0009512025862932205, 121215)
-            (0.0013293251395225525, 1886539)
-            (0.0016505345702171326, 1754979)
-            (0.0019492600113153458, 1454748)
-            (0.0022399872541427612, 12437249)
-            (0.0025303810834884644, 15061673)
-            (0.002826780080795288, 10959866)
-            (0.003133736550807953, 15911459)
-            (0.00345572829246521, 16322994)
-            (0.0037982426583766937, 6681831)
-            (0.004168237559497356, 5170313)
-            (0.004575051367282867, 12003846)
-            (0.005028977990150452, 10502411)
-            (0.005544133484363556, 5577521)
-            (0.006147712469100952, 11936530)
-            (0.006879240274429321, 9789645)
-            (0.007819503545761108, 16083500)
-            (0.009142260998487473, 15376375)
-            (0.011436126194894314, 5361912)
-            (0.25926145911216736, 15568689)
-            16795348
-            '''
-            #with open('errs.csv', 'w') as f:
-            #    for variance, n in pred_variance:
-            #        f.write('%d,%f\n' % (n, variance))
-        else:
-            xx, yy, groups = data_loader.load_ff('test')
-            print('xx =', xx)
-            print('yy =', yy)
-            print('Making new dimers...')
-            for y in np.arange(0.01, 5.0, 0.01):
-                new_x = np.copy(xx[0])
-                for i in range(3):
-                    new_x[3+i][2] += y
-                xx.append(new_x)
-                yy.append(0.0)
-            dataset = RawDataset(xx, yy)
-            #trainer.load('june12_24/save')
-            #trainer.load_best_params()                
-            Es = trainer.predict(dataset)
-            print('pred =')
-            r = 1.5
-            for E in Es:
-                print( r, (E-Es[0])*627.509 )
-                r+=0.01
+        print("------------Starting Training--------------")
+        trainer.train(save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count)
 
 if __name__ == "__main__":
     main()

@@ -325,7 +325,7 @@ class TrainerMultiTower():
         ws = self._weight_matrices()
         max_norm_ops = []
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
         self.max_norm_ops = max_norm_ops
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
@@ -569,12 +569,11 @@ class TrainerMultiTower():
             # gpu   0 1 2
             # bid0  1 1 1
             # bid1  1 1 0
-
             try:
 
                 n_batches = dataset.num_batches(batch_size)
 
-                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=1e-4)):
+                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=1e-5)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
                     if before_hooks:
                         self.sess.run(before_hooks)
