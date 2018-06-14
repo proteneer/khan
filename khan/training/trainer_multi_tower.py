@@ -13,6 +13,9 @@ from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 
+import sklearn.model_selection
+from khan.data.dataset import RawDataset
+
 ani_mod = None
 
 @ops.RegisterGradient("Featurize")
@@ -129,7 +132,7 @@ class TrainerMultiTower():
         towers,
         layer_sizes=(128, 128, 64, 8, 1),
         fit_charges=False,
-        charge_layer_sizes=(64, 64, 8, 1)
+        charge_layer_sizes=(128, 128, 64, 8, 1),
     ):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -182,11 +185,10 @@ class TrainerMultiTower():
                     beta1=0.9,
                     beta2=0.999,
                     epsilon=1e-8) # default is 1e-8
-            #self.learning_rate = tf.get_variable('learning_rate', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
             #self.optimizer = PowerSignOptimizer(learning_rate=self.learning_rate)
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.5))
+            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
             self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
@@ -240,6 +242,8 @@ class TrainerMultiTower():
                                 f1 = tf.reshape(f1, (-1, feat_size))
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
+
+                            print(f0.shape, f1.shape, f2.shape, f3.shape)
 
                             self.tower_features.append(tf.gather(
                                 tf.concat([f0, f1, f2, f3], axis=0),
@@ -406,7 +410,7 @@ class TrainerMultiTower():
     def get_loss_op(self):
         return self.exp_loss
 
-    def eval_abs_rmse(self, dataset, batch_size=1024):
+    def eval_abs_rmse(self, dataset, batch_size=2048):
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
@@ -480,7 +484,7 @@ class TrainerMultiTower():
                     yield f
 
 
-    def predict(self, dataset, batch_size=1024):
+    def predict(self, dataset, batch_size=2048):
         """
         Infer y-values given a dataset.
 
@@ -570,7 +574,7 @@ class TrainerMultiTower():
 
                 n_batches = dataset.num_batches(batch_size)
 
-                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle)):
+                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=1e-4)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
                     if before_hooks:
                         self.sess.run(before_hooks)
@@ -581,7 +585,8 @@ class TrainerMultiTower():
                         self.a_enq: atom_types,
                         self.m_enq: mol_idxs,
                         self.yt_enq: mol_yts,
-                        self.bi_enq: b_idx
+                        self.bi_enq: b_idx,
+                        #dropout_prob: (0.5 if shuffle else 1.0)
                     })
 
                     g_b_idx += 1
@@ -598,7 +603,7 @@ class TrainerMultiTower():
                             self.a_enq: np.zeros((0, ), dtype=np.int32),
                             self.m_enq: np.zeros((0, ), dtype=np.int32),
                             self.yt_enq: np.zeros((0, )),
-                            self.bi_enq: b_idx,
+                            self.bi_enq: b_idx
                         })
                         b_idx += 1
             except Exception as e:
@@ -611,3 +616,62 @@ class TrainerMultiTower():
 
         for i in range(n_tower_batches):
             yield self.sess.run(target_ops)
+
+    # run the actual training
+    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, max_global_epoch_count=1000):
+        train_ops = [
+            self.global_epoch_count,
+            self.learning_rate,
+            self.local_epoch_count,
+            self.unordered_l2s,
+            self.train_op
+        ]
+        start_time = time.time()
+        best_test_score = self.eval_abs_rmse(rd_test)
+        global_epoch = 0
+        while batch_size < max_batch_size and global_epoch <= max_global_epoch_count: # bigger batches as fitting goes on, makes updates less exploratory
+            while self.sess.run(self.local_epoch_count) < max_local_epoch_count and global_epoch <= max_global_epoch_count:
+                for step in range(2): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
+                    train_step_time = time.time()
+                    train_results = list( self.feed_dataset(
+                        rd_train,
+                        shuffle=True,
+                        target_ops=train_ops,
+                        batch_size=batch_size,
+                        before_hooks=self.max_norm_ops) )
+                    train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                    print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
+                global_epoch = train_results[0][0]
+                learning_rate = train_results[0][1]
+                local_epoch_count = train_results[0][2]
+                test_abs_rmse_time = time.time()
+                test_abs_rmse = self.eval_abs_rmse(rd_test)
+                #print('test_abs_rmse_time', time.time()-test_abs_rmse_time )
+                time_per_epoch = time.time() - start_time
+                start_time = time.time()
+                print(save_dir, end=' ')
+                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), 'batch_size', batch_size, '| train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+
+                if test_abs_rmse < best_test_score:
+                    self.save_best_params()
+                    best_test_score = test_abs_rmse
+                    self.sess.run([self.incr_global_epoch_count, self.reset_local_epoch_count])
+                else:
+                    self.sess.run([self.incr_global_epoch_count, self.incr_local_epoch_count])
+
+                gdb11_abs_rmse = self.eval_abs_rmse(rd_gdb11)
+                print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+                    print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(self.eval_abs_rmse(ff_data)), \
+                        "{0:.2f} kcal/mol | ".format(self.eval_eh_rmse(ff_data, ff_groups)), end='')
+                
+                print('')
+                self.save(save_dir)
+                
+            print("========== Decreasing learning rate, increasing batch size ==========")
+            self.load_best_params()
+            self.sess.run(self.decr_learning_rate)
+            self.sess.run(self.reset_local_epoch_count)
+            batch_size = int(batch_size*1.2)
+            max_local_epoch_count = int(max_local_epoch_count*1.2) # increase this since higher batch size means fewer actual gradient steps per epoch
+

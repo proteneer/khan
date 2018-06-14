@@ -151,7 +151,7 @@ def parse_xyz(xyz_file, use_fitted):
         return X, y, c
 
 
-def load_ff_files(ff_dir, use_fitted=False):
+def load_ff_files(ff_dir, use_fitted=False, names=[], group_names=[]):
     Xs = []
     ys = []
     g_ys = []
@@ -172,12 +172,14 @@ def load_ff_files(ff_dir, use_fitted=False):
                 Xs.append(X)
                 ys.append(y)
                 group_ys.append(y)
+                names.append(filepath)
 
             else:
                 print("Unknown filetype:", filename)
 
         if len(group_ys) > 0:
             g_ys.append(group_ys)
+            group_names.append(root)
 
     # for charge in [-2, -1, 0, 1, 2]:
         # m_idxs = np.argwhere(np.array(cs, dtype=np.int32) == charge)

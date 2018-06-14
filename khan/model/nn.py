@@ -33,24 +33,20 @@ class AtomNN():
         self.As = [features] # neurons
         self.atom_type = atom_type
 
+        self.alpha = tf.get_variable(prefix+'_'+atom_type+'_alpha', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
+
         for idx in range(1, len(layer_sizes)):
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             print('Layer', idx, 'input/output size', x, y)
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
-
-            with open('saved.npy', 'rb') as infile:
-                load_values = np.load(infile)
 
             with tf.device('/cpu:0'):
                 W = tf.get_variable(
                     prefix+"W"+name,
                     (x, y),
                     np.float32,
-                    #tf.random_uniform_initializer(minval=-0.1, maxval=0.1),
-                    #tf.random_normal_initializer(stddev=0.1),
-                    tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5),
-                    #tf.truncated_normal_initializer(mean=0, stddev=(1.0/x)**0.5 * (0.1 if idx==(len(layer_sizes)-1) else 1.0) ), # for use with SELU
-                    #tf.random_normal_initializer(mean=0, stddev=0.1), # for use with certain RELU
+                    #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
+                    tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
                     trainable=True
                 )
                 b = tf.get_variable(
@@ -61,19 +57,50 @@ class AtomNN():
                     trainable=True
                 )
 
-            #if idx != len(layer_sizes) - 1:
-            #tf.assign(W, tf.clip_by_norm(W, 2.0, axes=1))
-            #W = tf.clip_by_norm(W, 1.0, axes=1)
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
                 #A = tf.nn.selu(A) # "self-normalizing exponential" activation
-                A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
+                #A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
+                #A = A * tf.nn.sigmoid(A) # "swish" activation
+                #A += (tf.sqrt(A**2+1) - 1)*0.5 # "bent identity" activation function (like smooth leaky relu - unbounded, unlike ELU)
+                #A = tf.exp(-self.freq * A**2) # Gaussian activation
+                #A = tf.sin(A)
+                #A = tf.nn.elu(A) # ELU, kind of like RELU but smooth
+                #if idx > 1: A = tf.nn.dropout(A, 0.9) # dropout
                 #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
                 #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
+                # CELU activation
+                posA = tf.cast(tf.greater_equal(A,0),tf.float32) * A
+                negA = tf.cast(tf.less(A,0),tf.float32) * A
+                A = posA + self.alpha * ( tf.exp(negA/self.alpha) - 1 )
 
             self.Ws.append(W)
             self.bs.append(b)
             self.As.append(A)
+        '''
+        with tf.device('/cpu:0'):
+            x, y = layer_sizes[0], layer_sizes[-1] # straight from input to output
+            print('Linear layer', idx, 'input/output size', x, y)
+            name = "_"+atom_type+"_"+str(x)+"x"+str(y)
+            self.linear_W = tf.get_variable(
+                prefix+"linW"+name,
+                (x, y),
+                np.float32,
+                tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5),
+                trainable=True
+            )
+            self.linear_b = tf.get_variable(
+                prefix+"linb"+name,
+                (y),
+                np.float32,
+                tf.zeros_initializer,
+                trainable=True
+            )
+        linear_only = False
+        if linear_only:
+            self.As[-1] *= 0.0 # if linear only, main NN is just a placeholder for later fitting in another run
+        self.As[-1] += tf.matmul(self.As[0], self.linear_W) + self.linear_b
+        '''
 
     def atom_energies(self):
         """

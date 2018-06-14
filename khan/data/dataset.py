@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+from numpy.random import uniform
 import tensorflow as tf
 
 class RawDataset():
@@ -87,7 +88,7 @@ class RawDataset():
         """
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate(self, batch_size, shuffle):
+    def iterate(self, batch_size, shuffle, fuzz=0.0):
         """
         Generate batches of data of a fixed size.
 
@@ -136,11 +137,17 @@ class RawDataset():
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
 
-            mol_Xs = np.concatenate(mol_Xs, axis=0)
+            mol_Xs = np.concatenate(mol_Xs, axis=0) # this is a copy operation, so mol_Xs can be modified hereafter without risk to later runs
             mol_yts = None
+
+            if fuzz:
+                mol_Xs[:, 1] += uniform(-fuzz, fuzz, mol_Xs[:, 1].shape) # fuzz the xyz coords
+                mol_Xs[:, 2] += uniform(-fuzz, fuzz, mol_Xs[:, 2].shape) # fuzz the xyz coords
+                mol_Xs[:, 3] += uniform(-fuzz, fuzz, mol_Xs[:, 3].shape) # fuzz the xyz coords
 
             if self.all_ys is not None:
                 mol_yts = []
                 for p_idx in perm[s_m_idx:e_m_idx]:
                     mol_yts.append(self.all_ys[p_idx])
             yield mol_Xs, mol_ids, mol_yts
+
