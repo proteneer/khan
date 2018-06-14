@@ -75,7 +75,6 @@ def _feat_grad_grad(op, dLdx, dLdy, dLdz):
         dLdz
     )
 
-    # is this correct?
     return [
         None, # x
         None, # y
@@ -88,6 +87,7 @@ def _feat_grad_grad(op, dLdx, dLdy, dLdz):
         dh, dc, dn, do
     ]
 
+#(ytz: TODO) Add second derivative of this op to allow for training both charge and gradients
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
     """The gradients for `ani_charge`.
@@ -132,15 +132,20 @@ def flatten_results(res, pos=0):
 
 
 def average_gradients(tower_grads):
-    """Calculate the average gradient for each shared variable across all towers.
+    """
+    Calculate the average gradient for each shared variable across all towers.
     Note that this function provides a synchronization point across all towers.
-    Args:
-        tower_grads: List of lists of (gradient, variable) tuples. The outer list
-            is over individual gradients. The inner list is over the gradient
-            calculation for each tower.
-    Returns:
-        List of pairs of (gradient, variable) where the gradient has been averaged
-        across all towers.
+    
+    Parameters
+    -----------
+    tower_grads: List of lists of (gradient, variable) tuples. 
+        The outer list is over individual gradients. The inner list is over the gradient
+        calculation for each tower.
+
+    Returns
+    -------
+    List of pairs of (gradient, variable)
+        The gradient and its corresponding variable has been averaged across all towers.
 
     """
     average_grads = []
@@ -178,8 +183,7 @@ class TrainerMultiTower():
         towers,
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
-        fit_charges=False
-    ):
+        fit_charges=False):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
@@ -196,8 +200,7 @@ class TrainerMultiTower():
             Whether or not we fit partial charges
 
         precision: tf.dtype
-            Should be either tf.float32 or tf.float64        
-
+            Should be either tf.float32 or tf.float64
 
         """
         self.towers = towers
@@ -220,10 +223,10 @@ class TrainerMultiTower():
             precision,  # Xs
             precision,  # Ys
             precision,  # Zs
-            tf.int32,    # As
-            tf.int32,    # mol ids
+            tf.int32,   # As
+            tf.int32,   # mol ids
             precision,  # Y TRUEss
-            tf.int32,    # b_idxs
+            tf.int32,   # b_idxs
         ]
 
         qtypes = [
@@ -246,9 +249,7 @@ class TrainerMultiTower():
         queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=dtypes);
 
         self.put_op = queue.enqueue(qtypes)
-
         self.sess = sess
-
         self.non_trainable_variables = []
 
         with tf.device('/cpu:0'):
@@ -267,8 +268,6 @@ class TrainerMultiTower():
             self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
             self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
             self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
-
-            # self.non_trainable_variables.extend([self.learning_rate, self.global_step, self.global_epoch_count, self.local_epoch_count])
 
             # these data elements are unordered since the gpu grabs the batches in different orders
             self.tower_grads = [] # average is order invariant
@@ -413,20 +412,6 @@ class TrainerMultiTower():
                             tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
                             self.tower_force_grads.append(tower_force_grad)
 
-            self.best_params = []
-            self.save_best_params_ops = []
-            self.load_best_params_ops = []
-
-            # for var in self.parameters:
-            #     copy_name = "best_"+var.name.split(":")[0]
-
-            #     copy_shape = var.shape
-            #     copy_type = var.dtype
-            #     var_copy = tf.get_variable(copy_name, copy_shape, copy_type, tf.zeros_initializer, trainable=False)
-            #     self.best_params.append(var_copy)
-            #     self.save_best_params_ops.append(tf.assign(var_copy, var))
-            #     self.load_best_params_ops.append(tf.assign(var, var_copy))
-
             def tower_grads(grads):
                 apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
                 variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
@@ -434,8 +419,6 @@ class TrainerMultiTower():
                 return tf.group(apply_gradient_op, variables_averages_op)
 
             self.train_op = tower_grads(self.tower_grads)
-
-            # if fit_forces:
             self.train_op_forces = tower_grads(self.tower_force_grads)
 
         ws = self._weight_matrices()
@@ -456,18 +439,6 @@ class TrainerMultiTower():
         Randomly initialize the parameters in the trainer's underlying model.
         """
         self.sess.run(self.global_initializer_op)
-
-    def save_best_params(self):
-        """
-        (DEPRECATED) Copy the current model's trainable parameters as the best so far.
-        """
-        self.sess.run(self.save_best_params_ops)
-
-    def load_best_params(self):
-        """
-        (DEPCREATED) Restore the current model's parameters from the best found so far.
-        """
-        self.sess.run(self.load_best_params_ops)
 
     def save_numpy(self, npz_file):
         """
@@ -521,7 +492,7 @@ class TrainerMultiTower():
 
     def save(self, save_dir):
         """
-        (DEPRECATED) Save the entire model to a given directory.
+        (DEPRECATED) Save the entire model to a given directory. Use save_numpy instead.
 
         Parameters
         ----------
@@ -538,7 +509,7 @@ class TrainerMultiTower():
     def load(self, save_dir):
         """
         (DEPRECATED) Load an existing model from an existing directory and initialize
-        the trainer's Session variables.
+        the trainer's Session variables. Use load_numpy instead.
 
         Parameters
         ----------
@@ -577,12 +548,30 @@ class TrainerMultiTower():
         return self.exp_loss
 
     def eval_abs_rmse(self, dataset, batch_size=1024):
+        """
+        Evaluates the absolute RMSE in kcal/mols of the y-values given dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset for evaluation
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        float
+            A scalar for the RMSE of the dataset
+
+        """
+        # Todo: add support for force errors.
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
 
     def coordinate_gradients(self, dataset, batch_size=1024):
         """
-        Compute gradients for a dataset.
+        Compute gradients with respect to the (x,y,z) coordinates of a dataset.
 
         Parameters
         ----------
@@ -680,9 +669,35 @@ class TrainerMultiTower():
             ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
         return ordered_ys
 
-    def eval_eh_rmse(self, dataset, group_ys, batch_size=1024):
+    def eval_rel_rmse(self, dataset, group_ys, batch_size=1024):
+        """
+        Evaluates the relative RMSE in kcal/mols of the y-values given dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset for evaluation. The y-values are ignored.
+
+        group_ys: list of list of floats
+            group_ys will be used in-place of the dataset's true y values.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        float
+            A scalar for the RMSE of the dataset
+
+        """
         ordered_ys = self.predict(dataset, batch_size)
         return ed_harder_rmse(group_ys, ordered_ys) * HARTREE_TO_KCAL_PER_MOL
+
+    def eval_eh_rmse(self, dataset, group_ys, batch_size=1024):
+        """
+        (DEPRECATED) renamed to eval_rel_rmse
+        """
+        return self.eval_rel_rmse(dataset, group_ys, batch_size)
 
     def feed_dataset(self,
         dataset,
@@ -716,9 +731,9 @@ class TrainerMultiTower():
         A generator that yields results of the specified op in increments of batch_size.
 
         .. note:: You must ensure that resulting generator is fully iterated over to ensure
-        proper terminating of the submission threads. Furthermore, the resulting iterable
-        should be as non-blocking as possible, since flushing of the queue assumes that the
-        results are consumed asap.
+            proper terminating of the submission threads. Furthermore, the resulting iterable
+            should be as non-blocking as possible, since flushing of the queue assumes that the
+            results are consumed asap.
 
         """
 
@@ -726,8 +741,6 @@ class TrainerMultiTower():
 
             accum = 0
             g_b_idx = 0
-
-            # for i in range(self.num_gpus):
 
             # suppose we have 4 gpus and 5 batches
             # the distribution schedule is as follows:
@@ -759,8 +772,6 @@ class TrainerMultiTower():
                         self.yt_enq: mol_yts,
                         self.bi_enq: b_idx
                     }
-
-                    # print("XS", mol_xs, mol_grads)
 
                     if mol_grads is not None:
                         feed_dict[self.force_enq_x] = mol_grads[:, 0]

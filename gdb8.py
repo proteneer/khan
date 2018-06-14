@@ -18,13 +18,13 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--ani_lib', required=True, help="Location of the shared object for GPU featurization")
+    parser.add_argument('--ani-lib', required=True, help="Location of the shared object for GPU featurization")
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
-    parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
+    parser.add_argument('--add-ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
     parser.add_argument('--gpus', default=1, help="Number of gpus we use")
 
-    parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
-    parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
+    parser.add_argument('--save-dir', default='~/work', help="Location where save data is dumped. If the folder does not exist then it will be created.")
+    parser.add_argument('--train-dir', default='~/ANI-1_release', help="Location where training data is located")
 
     args = parser.parse_args()
 
@@ -35,10 +35,10 @@ def main():
     initialize_module(lib_path)
 
     ANI_TRAIN_DIR = args.train_dir
-    ANI_WORK_DIR = args.work_dir
+    ANI_SAVE_DIR = args.save_dir
 
-    # save_dir = os.path.join(ANI_WORK_DIR, "save")
-    save_file = os.path.join(ANI_WORK_DIR, "save_file.npz")
+    # save_dir = os.path.join(ANI_SAVE_DIR, "save")
+    save_file = os.path.join(ANI_SAVE_DIR, "save_file.npz")
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
@@ -71,7 +71,7 @@ def main():
         else:
             towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
 
-        print("--towers:", towers)
+        print("Soft placing operations onto towers:", towers)
 
         trainer = TrainerMultiTower(
             sess,
@@ -85,6 +85,9 @@ def main():
             print("Restoring existing model from", save_file)
             trainer.load_numpy(save_file)
         else:
+            if not os.path.exists(ANI_SAVE_DIR):
+                print("Save directory",ANI_SAVE_DIR,"does not existing... creating")
+                os.makedirs(ANI_SAVE_DIR)
             trainer.initialize() # initialize to random variables
 
         max_local_epoch_count = 10
@@ -99,6 +102,7 @@ def main():
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
+        # Uncomment if you'd like to inspect the gradients
         # all_grads = []
         # for grad in trainer.coordinate_gradients(rd_test):
         #     all_grads.append(grad)
