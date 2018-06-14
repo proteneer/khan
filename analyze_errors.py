@@ -199,17 +199,25 @@ def main():
                 ts_predictions = np.array(trainer.predict(rd_ts))
 
                 barriers = (Ets - Er)*KCAL
+                reverse_barriers = (Ets - Ep)*KCAL
                 predicted_barriers = (ts_predictions - r_predictions)*KCAL
+                predicted_reverse_barriers = (ts_predictions - p_predictions)*KCAL
                 rxn_e = (Ep - Er)*KCAL
                 predicted_rxn_e = (p_predictions - r_predictions)*KCAL
 
                 barrier_errors = barriers - predicted_barriers
                 barrier_rmse = np.sqrt(sum(barrier_errors[:]**2.0)/len(barrier_errors))
+                reverse_barrier_errors = reverse_barriers - predicted_reverse_barriers
+                reverse_barrier_rmse = np.sqrt(sum(reverse_barrier_errors[:]**2.0)/len(reverse_barrier_errors))
                 rxn_errors = rxn_e - predicted_rxn_e
                 rxn_rmse = np.sqrt(sum(rxn_errors[:]**2.0)/len(rxn_errors))
 
                 # barrier height plot
                 bmu, bsigma = histogram(barrier_errors, "Barrier height errors")
+                rbmu, rbsigma = histogram(
+                    reverse_barrier_errors,
+                    "Reverse Barrier height errors"
+                )
                 rmu, rsigma = histogram(rxn_errors, "Reaction energy errors")
                 plt.xlabel("Error (kcal/mol)")
                 plt.title("Reaction energetic errors for %s" % dataname)
@@ -222,8 +230,10 @@ def main():
 
                 print("errors for %s" % dataname)
                 print("Barrier RMSE %.2f rxn RMSE %.2f" % (barrier_rmse, rxn_rmse))
+                print("Reverse Barrier RMSE %.2f" % reverse_barrier_rmse)
                 print("rxn mu %f sigma %f" % (rmu, rsigma))
                 print("barrier mu %f sigma %f" % (bmu, bsigma))
+                print("reverse barrier mu %f sigma %f" % (rbmu, rbsigma))
                 
         
         # plot distribution of raw errors
