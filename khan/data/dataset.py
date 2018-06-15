@@ -1,12 +1,11 @@
 import math
 
 import numpy as np
-from numpy.random import uniform
 import tensorflow as tf
 
 class RawDataset():
 
-    def __init__(self, all_Xs, all_ys=None):
+    def __init__(self, all_Xs, all_ys=None, all_grads=None):
         """
         Construct a raw, unfeaturized dataset representing a collection of molecules and
         optionaly their corresponding y values.
@@ -21,6 +20,10 @@ class RawDataset():
         all_ys: np.array (optional)
             rank-1 numpy array representing the value of each molecule in the all_Xs array. This is
             not needed when doing inference.
+
+        all_grads: np.array(optional),
+            rank-3 numpy array representing the forces on each coordinate. If this array is provided,
+            then every conformation must have a corresponding gradient.
 
         Example:
         -------
@@ -45,9 +48,27 @@ class RawDataset():
 
         ys = np.array([1.5, 3.3])
 
+        gs = [
+            np.array([
+                [1.0, 2.0, 3.0], # H force
+                [2.0, 1.0, 4.0], # N force
+                [0.5, 1.2, 2.3], # H force
+                [0.3, 1.7, 3.2], # C force
+                [0.6, 1.2, 1.1], # N force
+                [14.0, 23.0, 15.0], # H force
+                [2.0, 0.5, 0.3], # H force
+                [2.3, 0.2, 0.4]  # H force
+            ]), # mol0 forces
+            np.array([
+                [2.3, 0.2, 0.4], # H force
+                [0.3, 1.7, 3.2], # C force
+                [0.6, 1.2, 1.1], # N force
+            ])  # mol1 forces
+        ]
+
         dataset = RawDataset(Xs, ys)
 
-        for xs, m_ids, ys in dataset.iterate(2, batch_size=4, shuffle=True):
+        for xs, m_ids, ys, gs in dataset.iterate(2, batch_size=4, shuffle=True):
             print(xs) => mol1 then mol 0
             print(m_ids) => [1,1,1,0,0,0,0,0]
             print(ys) => [3.3, 1.5]
@@ -56,8 +77,14 @@ class RawDataset():
             API, so long as the num_mols(), num_batches(), an iterate() methods are implemented.
 
         """
+        if all_grads is not None:
+            for g in all_grads:
+                assert g is not None
+
         self.all_ys = all_ys
         self.all_Xs = all_Xs
+        self.all_grads = all_grads
+
 
     def num_mols(self):
         """
@@ -88,7 +115,7 @@ class RawDataset():
         """
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate(self, batch_size, shuffle, fuzz=0.0):
+    def iterate(self, batch_size, shuffle, fuzz=None):
         """
         Generate batches of data of a fixed size.
 
@@ -101,6 +128,9 @@ class RawDataset():
             If True then we do complete mixing of the dataset, else a stable consecutive
             ordering is assumed.
 
+        fuzz: float or None
+            If fuzz is not None 
+
         Yields
         ------
         3-tuple
@@ -111,7 +141,6 @@ class RawDataset():
         the remainder num_mols % batch_size.
 
         """
-
         perm = np.arange(len(self.all_Xs))
         if shuffle:
             np.random.shuffle(perm)
@@ -127,27 +156,28 @@ class RawDataset():
 
             for local_idx, p_idx in enumerate(perm[s_m_idx:e_m_idx]):
                 mol = self.all_Xs[p_idx]
-
-                # (ytz): do *not* remove this line. It's a super important sanity check since our
-                # GPU kernels do not support larger than 32 atoms.
-                if len(mol) > 32:
-                    print("FATAL: Molecules with more than 32 atoms are not supported.")
-                    assert 0
-
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
 
             mol_Xs = np.concatenate(mol_Xs, axis=0) # this is a copy operation, so mol_Xs can be modified hereafter without risk to later runs
             mol_yts = None
+            mol_grads = None
 
-            if fuzz:
-                mol_Xs[:, 1] += uniform(-fuzz, fuzz, mol_Xs[:, 1].shape) # fuzz the xyz coords
-                mol_Xs[:, 2] += uniform(-fuzz, fuzz, mol_Xs[:, 2].shape) # fuzz the xyz coords
-                mol_Xs[:, 3] += uniform(-fuzz, fuzz, mol_Xs[:, 3].shape) # fuzz the xyz coords
+            if fuzz is not None:
+                mol_Xs[:, 1] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 1].shape) # fuzz the xyz coords
+                mol_Xs[:, 2] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 2].shape) # fuzz the xyz coords
+                mol_Xs[:, 3] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 3].shape) # fuzz the xyz coords
 
             if self.all_ys is not None:
                 mol_yts = []
                 for p_idx in perm[s_m_idx:e_m_idx]:
                     mol_yts.append(self.all_ys[p_idx])
-            yield mol_Xs, mol_ids, mol_yts
 
+            if self.all_grads is not None:
+                mol_grads = []
+                for p_idx in perm[s_m_idx:e_m_idx]:
+                    mol_grads.append(self.all_grads[p_idx])                
+                
+                mol_grads = np.concatenate(mol_grads, axis=0)
+
+            yield mol_Xs, mol_ids, mol_yts, mol_grads

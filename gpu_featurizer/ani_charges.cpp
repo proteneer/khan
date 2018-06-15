@@ -19,6 +19,7 @@
 #include <numeric>
 
 #include "parameters.h"
+// #include "numeric_helpers.h"
 
 #include <cmath>
 
@@ -28,15 +29,13 @@ using CPUDevice = Eigen::ThreadPoolDevice;
 
 const long long num_atom_types = 4;
 
-static inline float dist_diff(float dx, float dy, float dz) {
-
+static inline double dist_diff(double dx, double dy, double dz) {
     return sqrt(dx*dx+dy*dy+dz*dz);
-
 }
 
-inline float f_C(float r_ij, float r_c) {
+static inline double f_C(double r_ij, double r_c) {
     if (r_ij <= r_c) {
-        return 0.5 * cosf((M_PI * r_ij) / r_c) + 0.5;
+        return 0.5 * cos((M_PI * r_ij) / r_c) + 0.5;
     } else {
         return 0;
     }
@@ -44,32 +43,34 @@ inline float f_C(float r_ij, float r_c) {
 
 // implement AniCharge and AniChargeGrad
 REGISTER_OP("AniCharge")
-  .Input("xs: float32")
-  .Input("ys: float32")
-  .Input("zs: float32") // 
-  .Input("qs: float32") // partial charges
+  .Input("xs: FT")
+  .Input("ys: FT")
+  .Input("zs: FT") // 
+  .Input("qs: FT") // partial charges
   .Input("mos: int32") // mol offsets
   .Input("macs: int32") // mol atom counts
-  .Output("charge_energies: float32")
+  .Output("charge_energies: FT")
+  .Attr("FT: {float32, float64}")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
     return Status::OK();
   });
 
-float charge_energy(const float *xs,  const float *ys, const float *zs, const float *qs, size_t num_atoms) {
-  float energy = 0;
+template<typename NumericType>
+NumericType charge_energy(const NumericType *xs,  const NumericType *ys, const NumericType *zs, const NumericType *qs, size_t num_atoms) {
+  NumericType energy = 0;
   for(size_t i=0; i < num_atoms; i++) {
     for(size_t j=i+1; j < num_atoms; j++) {
-      float dx = xs[i] - xs[j];
-      float dy = ys[i] - ys[j];
-      float dz = zs[i] - zs[j];
-      float r = dist_diff(dx, dy, dz);
+      NumericType dx = xs[i] - xs[j];
+      NumericType dy = ys[i] - ys[j];
+      NumericType dz = zs[i] - zs[j];
+      NumericType r = dist_diff(dx, dy, dz);
       energy += CHARGE_CONSTANT*qs[i]*qs[j]*(1-f_C(r, R_Rc))/r;
     }
   }
-  // std::cout << "energy:" << energy << std::endl;
   return energy;
 }
 
+template<typename NumericType>
 class AniCharge : public OpKernel {
 
  public:
@@ -88,10 +89,10 @@ class AniCharge : public OpKernel {
 
     long long num_mols = input_macs.shape().num_elements();
 
-    const float* raw_input_xs = input_xs.flat<float>().data();
-    const float* raw_input_ys = input_ys.flat<float>().data();
-    const float* raw_input_zs = input_zs.flat<float>().data();
-    const float* raw_input_qs = input_qs.flat<float>().data();
+    const NumericType* raw_input_xs = input_xs.flat<NumericType>().data();
+    const NumericType* raw_input_ys = input_ys.flat<NumericType>().data();
+    const NumericType* raw_input_zs = input_zs.flat<NumericType>().data();
+    const NumericType* raw_input_qs = input_qs.flat<NumericType>().data();
     const int* raw_input_mos = input_mos.flat<int>().data();
     const int* raw_input_macs = input_macs.flat<int>().data();
 
@@ -99,7 +100,7 @@ class AniCharge : public OpKernel {
 
     OP_REQUIRES_OK(context, context->allocate_output("charge_energies", TensorShape({num_mols}), &charge_energies));
 
-    float* raw_output_charge_energies = charge_energies->flat<float>().data(); // uninitialized but safe
+    NumericType* raw_output_charge_energies = charge_energies->flat<NumericType>().data(); // uninitialized but safe
 
     // (ytz): probably parallelizable at some point
     for(size_t m_idx=0; m_idx < num_mols; m_idx++) {
@@ -107,7 +108,7 @@ class AniCharge : public OpKernel {
       size_t offset = raw_input_mos[m_idx];
       size_t num_atoms = raw_input_macs[m_idx];
 
-      raw_output_charge_energies[m_idx] = charge_energy(
+      raw_output_charge_energies[m_idx] = charge_energy<NumericType>(
         raw_input_xs+offset,
         raw_input_ys+offset,
         raw_input_zs+offset,
@@ -120,32 +121,34 @@ class AniCharge : public OpKernel {
 
 
 REGISTER_OP("AniChargeGrad")
-  .Input("xs: float32")
-  .Input("ys: float32")
-  .Input("zs: float32") // 
-  .Input("qs: float32") // partial charges
+  .Input("xs: FT")
+  .Input("ys: FT")
+  .Input("zs: FT") // 
+  .Input("qs: FT") // partial charges
   .Input("mos: int32") // mol offsets
   .Input("macs: int32") // mol atom counts
-  .Input("grads: float32") // input gradients
-  .Output("q_grads: float32")
+  .Input("grads: FT") // input gradients
+  .Output("q_grads: FT")
+  .Attr("FT: {float32, float64}")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
     return Status::OK();
   });
 
 
-float charge_grads(const float *xs,  const float *ys, const float *zs, const float *qs, size_t num_atoms, float *q_grads, float nrg_grad) {
+template<typename NumericType>
+NumericType charge_grads(const NumericType *xs,  const NumericType *ys, const NumericType *zs, const NumericType *qs, size_t num_atoms, NumericType *q_grads, NumericType nrg_grad) {
   for(size_t i=0; i < num_atoms; i++) {
-    float q_grad_i = 0;
+    NumericType q_grad_i = 0;
     // note: this start at 0 unlike the energy calculation
     for(size_t j=i+1; j < num_atoms; j++) {
       if(i==j) {
         continue;
       }
-      float dx = xs[i] - xs[j];
-      float dy = ys[i] - ys[j];
-      float dz = zs[i] - zs[j];
+      NumericType dx = xs[i] - xs[j];
+      NumericType dy = ys[i] - ys[j];
+      NumericType dz = zs[i] - zs[j];
       
-      float r = dist_diff(dx, dy, dz);
+      NumericType r = dist_diff(dx, dy, dz);
       // accum i locally
       q_grad_i += nrg_grad*CHARGE_CONSTANT*qs[j]*(1-f_C(r, R_Rc))/r;
 
@@ -156,7 +159,7 @@ float charge_grads(const float *xs,  const float *ys, const float *zs, const flo
   }
 }
 
-
+template<typename NumericType>
 class AniChargeGrad : public OpKernel {
 
  public:
@@ -177,21 +180,21 @@ class AniChargeGrad : public OpKernel {
     long long num_mols = input_macs.shape().num_elements();
     long long total_num_atoms = input_xs.shape().num_elements();
 
-    const float* raw_input_xs = input_xs.flat<float>().data();
-    const float* raw_input_ys = input_ys.flat<float>().data();
-    const float* raw_input_zs = input_zs.flat<float>().data();
-    const float* raw_input_qs = input_qs.flat<float>().data();
+    const NumericType* raw_input_xs = input_xs.flat<NumericType>().data();
+    const NumericType* raw_input_ys = input_ys.flat<NumericType>().data();
+    const NumericType* raw_input_zs = input_zs.flat<NumericType>().data();
+    const NumericType* raw_input_qs = input_qs.flat<NumericType>().data();
     const int* raw_input_mos = input_mos.flat<int>().data();
     const int* raw_input_macs = input_macs.flat<int>().data();
-    const float* raw_input_grads = input_grads.flat<float>().data();
+    const NumericType* raw_input_grads = input_grads.flat<NumericType>().data();
 
     Tensor *q_grads;
 
     OP_REQUIRES_OK(context, context->allocate_output("q_grads", TensorShape({total_num_atoms}), &q_grads));
 
-    float* grad_vals = q_grads->flat<float>().data(); // uninitialized but safe
+    NumericType* grad_vals = q_grads->flat<NumericType>().data(); // uninitialized but safe
 
-    memset(grad_vals, 0, total_num_atoms*sizeof(float));
+    memset(grad_vals, 0, total_num_atoms*sizeof(NumericType));
 
     // (ytz): probably parallelizable at some point
     for(size_t m_idx=0; m_idx < num_mols; m_idx++) {
@@ -199,7 +202,7 @@ class AniChargeGrad : public OpKernel {
       size_t offset = raw_input_mos[m_idx];
       size_t num_atoms = raw_input_macs[m_idx];
 
-      charge_grads(
+      charge_grads<NumericType>(
         raw_input_xs+offset,
         raw_input_ys+offset,
         raw_input_zs+offset,
@@ -214,12 +217,8 @@ class AniChargeGrad : public OpKernel {
 };
 
 
+REGISTER_KERNEL_BUILDER(Name("AniCharge").Device(DEVICE_CPU).TypeConstraint<float>("FT"), AniCharge<float>);
+REGISTER_KERNEL_BUILDER(Name("AniCharge").Device(DEVICE_CPU).TypeConstraint<double>("FT"), AniCharge<double>);
 
-REGISTER_KERNEL_BUILDER(
-  Name("AniCharge").Device(DEVICE_CPU), AniCharge
-);
-
-
-REGISTER_KERNEL_BUILDER(
-  Name("AniChargeGrad").Device(DEVICE_CPU), AniChargeGrad
-);
+REGISTER_KERNEL_BUILDER(Name("AniChargeGrad").Device(DEVICE_CPU).TypeConstraint<float>("FT"), AniChargeGrad<float>);
+REGISTER_KERNEL_BUILDER(Name("AniChargeGrad").Device(DEVICE_CPU).TypeConstraint<double>("FT"), AniChargeGrad<double>);

@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, atom_type="", prefix=""):
+    def __init__(self, features, layer_sizes, precision, atom_type="", prefix=""):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -17,13 +17,14 @@ class AtomNN():
             0th layer should be the size of the features, while the last layer must
             be exactly of size 1.
 
-        activation_fns: list of functions
-            A list of activation
+        precision: tf.dtype
+            Should be either tf.float32 or tf.float64        
 
         atom_type: str
             The type of atom we're 
 
         """
+        assert (precision is tf.float32) or (precision is tf.float64)
 
         assert layer_sizes[-1] == 1
 
@@ -33,7 +34,7 @@ class AtomNN():
         self.As = [features] # neurons
         self.atom_type = atom_type
 
-        self.alpha = tf.get_variable(prefix+'_'+atom_type+'_alpha', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
+        # self.alpha = tf.get_variable(prefix+'_'+atom_type+'_alpha', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
 
         for idx in range(1, len(layer_sizes)):
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
@@ -44,7 +45,7 @@ class AtomNN():
                 W = tf.get_variable(
                     prefix+"W"+name,
                     (x, y),
-                    np.float32,
+                    precision,
                     #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
                     tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
                     trainable=True
@@ -52,7 +53,7 @@ class AtomNN():
                 b = tf.get_variable(
                     prefix+"b"+name,
                     (y),
-                    np.float32,
+                    precision,
                     tf.zeros_initializer,
                     trainable=True
                 )
@@ -72,35 +73,15 @@ class AtomNN():
                 # CELU activation
                 posA = tf.cast(tf.greater_equal(A,0),tf.float32) * A
                 negA = tf.cast(tf.less(A,0),tf.float32) * A
-                A = posA + self.alpha * ( tf.exp(negA/self.alpha) - 1 )
+                alpha = 0.1
+                A = posA + alpha * ( tf.exp(negA/alpha) - 1 )
 
             self.Ws.append(W)
             self.bs.append(b)
             self.As.append(A)
-        '''
-        with tf.device('/cpu:0'):
-            x, y = layer_sizes[0], layer_sizes[-1] # straight from input to output
-            print('Linear layer', idx, 'input/output size', x, y)
-            name = "_"+atom_type+"_"+str(x)+"x"+str(y)
-            self.linear_W = tf.get_variable(
-                prefix+"linW"+name,
-                (x, y),
-                np.float32,
-                tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5),
-                trainable=True
-            )
-            self.linear_b = tf.get_variable(
-                prefix+"linb"+name,
-                (y),
-                np.float32,
-                tf.zeros_initializer,
-                trainable=True
-            )
-        linear_only = False
-        if linear_only:
-            self.As[-1] *= 0.0 # if linear only, main NN is just a placeholder for later fitting in another run
-        self.As[-1] += tf.matmul(self.As[0], self.linear_W) + self.linear_b
-        '''
+
+    def get_parameters(self):
+        return self.Ws + self.bs
 
     def atom_energies(self):
         """
@@ -164,6 +145,7 @@ class MoleculeNN():
         atom_type_features,
         gather_idxs,
         layer_sizes,
+        precision,
         prefix):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
@@ -194,7 +176,7 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, atom_type, prefix)
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, atom_type, prefix)
             self.anns.append(ann)
             atom_type_nrgs.append(ann.atom_energies())
 
@@ -202,8 +184,11 @@ class MoleculeNN():
         self.atom_outputs = tf.reshape(self.atom_outputs, (-1, )) # (batch_size,)
         # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
-    # def atom_outputs(self):
-        # return self.atom_outputs
+    def get_parameters(self):
+        all_params = []
+        for a in self.anns:
+            all_params.extend(a.get_parameters())
+        return all_params
 
     def predict_op(self):
         """

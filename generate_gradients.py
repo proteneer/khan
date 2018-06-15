@@ -62,7 +62,15 @@ def radial(a, b):
     return sp.exp(-eta*((dist(a,b)-Rs) ** 2))*f_C(a,b)
 
 def angular(a, b, c):
-    first = (1 + cos_ijk(a,b,c)*sp.cos(Ts) + sin_ijk(a,b,c)*sp.sin(Ts)) ** zeta
+
+    ij = vec_diff(a, b)
+    ik = vec_diff(a, c)
+
+    theta_ijk = sp.acos(dot(ij,ik) / (norm_self(ij)*norm_self(ik)))
+    first = (1+sp.cos(theta_ijk - Ts)) ** zeta
+
+    # first = (1 + cos_ijk(a,b,c)*sp.cos(Ts) + sin_ijk(a,b,c)*sp.sin(Ts)) ** zeta
+
     second = sp.exp(-eta*((dist(a,b) + dist(a,c))/2 - Rs) ** 2)
     third = f_C(a,b) * f_C(a,c)
     return 2**(1-zeta)*first*second*third
@@ -76,9 +84,9 @@ Rs = symbols('R_Rs[r_idx]')
 eta = symbols('R_eta')
 print(sp.ccode(radial(aa, bb)))
 print("---")
-A0 = sp.ccode(sp.diff(radial(aa, bb), bb[0]))
-A1 = sp.ccode(sp.diff(radial(aa, bb), bb[1]))
-A2 = sp.ccode(sp.diff(radial(aa, bb), bb[2]))
+A0 = sp.ccode(sp.diff(radial(aa, bb), aa[0]))
+A1 = sp.ccode(sp.diff(radial(aa, bb), aa[1]))
+A2 = sp.ccode(sp.diff(radial(aa, bb), aa[2]))
 print(A0)
 print("--")
 print(A1)

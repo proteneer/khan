@@ -10,6 +10,7 @@ TF_LFLAGS=-L/home/yzhao/venv/lib/python3.5/site-packages/tensorflow -ltensorflow
 
 NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
 CC=g++
+# CC_FLAGS=-std=c++11 -O2 -march=native -fPIC $(TF_CFLAGS)
 CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
 CC_LINK_FLAGS=$(TF_LFLAGS)
 
@@ -47,6 +48,9 @@ ani_sort.o: ani_sort.cpp
 
 ani_charges.o: ani_charges.cpp parameters.h
 	$(CC) ani_charges.cpp -c $(CC_FLAGS)
+
+# numeric_helpers.o: numeric_helpers.cpp
+	# $(CC) numeric_helpers.cpp -c $(CC_FLAGS)
 
 clean:
 	rm -f *.o

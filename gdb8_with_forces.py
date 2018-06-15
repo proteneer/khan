@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
     parser.add_argument('--gpus', default=1, help="Number of gpus we use")
+    parser.add_argument('--train_forces', default=True, help="If we train to the forces")
 
     parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
@@ -37,8 +38,7 @@ def main():
     ANI_TRAIN_DIR = args.train_dir
     ANI_WORK_DIR = args.work_dir
 
-    # save_dir = os.path.join(ANI_WORK_DIR, "save")
-    save_file = os.path.join(ANI_WORK_DIR, "save_file.npz")
+    save_dir = os.path.join(ANI_WORK_DIR, "save")
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata
@@ -47,6 +47,7 @@ def main():
 
     all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
 
+    # todo: ensure disjunction in train_test_valid
     X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
     rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
@@ -56,6 +57,10 @@ def main():
     batch_size = 1024
 
     config = tf.ConfigProto(allow_soft_placement=True)
+
+    all_Xs_f, all_Ys_f, all_Fs_f = data_loader.load_gdb8_forces(ANI_TRAIN_DIR) # todo: figure out how to split this consistently later
+
+    rd_train_forces = RawDataset(all_Xs_f, all_Ys_f, all_Fs_f)
 
     with tf.Session(config=config) as sess:
 
@@ -71,21 +76,21 @@ def main():
         else:
             towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
 
-        print("--towers:", towers)
+        print("towers:", towers)
 
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float64,
+            precision=tf.float32,
             layer_sizes=(128, 128, 64, 1),
-            fit_charges=False,
+            # fit_charges=True,
         )
 
-        if os.path.exists(save_file):
-            print("Restoring existing model from", save_file)
-            trainer.load_numpy(save_file)
-        else:
-            trainer.initialize() # initialize to random variables
+        # if os.path.exists(save_dir):
+            # print("Restoring existing model from", save_dir)
+            # trainer.load(save_dir)
+        # else:
+        trainer.initialize() # initialize to random variables
 
         max_local_epoch_count = 10
 
@@ -97,53 +102,43 @@ def main():
             trainer.train_op,
         ]
 
-        best_test_score = trainer.eval_abs_rmse(rd_test)
-
-        # all_grads = []
-        # for grad in trainer.coordinate_gradients(rd_test):
-        #     all_grads.append(grad)
-        # assert len(all_grads) == rd_test.num_mols()
 
         print("------------Starting Training--------------")
 
         start_time = time.time()
 
+        train_forces = bool(int(args.train_forces)) # python is retarded
+
+        # training with forces
         while sess.run(trainer.learning_rate) > 5e-10: # this is to deal with a numerical error, we technically train to 1e-9
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
-
                 start_time = time.time()
-                train_results = list(trainer.feed_dataset(
+                # train to forces
+                if train_forces:
+                    train_results_forces = list(trainer.feed_dataset(
+                        rd_train_forces,
+                        shuffle=True,
+                        target_ops=[trainer.train_op_forces, trainer.tower_force_rmses],
+                        batch_size=batch_size,
+                        before_hooks=trainer.max_norm_ops))
+                    print(train_results_forces, end=" | ")
+
+                #train to energies
+                train_results_energies = list(trainer.feed_dataset(
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size,
                     before_hooks=trainer.max_norm_ops))
 
-                global_epoch = train_results[0][0]
-                time_per_epoch = time.time() - start_time
-                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                learning_rate = train_results[0][1]
-                local_epoch_count = train_results[0][2]
-
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-                    'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+                gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
 
-                if test_abs_rmse < best_test_score:
-                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                print(time.time()-start_time, train_abs_rmse, test_abs_rmse, gdb11_abs_rmse)
 
-                    best_test_score = test_abs_rmse
-                    sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
-                else:
-                    sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
-
-                trainer.save_numpy(save_file)
-
-                print('', end='\n')
 
             print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)

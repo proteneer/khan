@@ -38,11 +38,11 @@ class DataLoader():
             os.path.join(data_dir, "ani_gdb_s01.h5"),
             os.path.join(data_dir, "ani_gdb_s02.h5"),
             os.path.join(data_dir, "ani_gdb_s03.h5"),
-            os.path.join(data_dir, "ani_gdb_s04.h5"),
-            os.path.join(data_dir, "ani_gdb_s05.h5"),
-            os.path.join(data_dir, "ani_gdb_s06.h5"),
-            os.path.join(data_dir, "ani_gdb_s07.h5"),
-            os.path.join(data_dir, "ani_gdb_s08.h5"),
+            # os.path.join(data_dir, "ani_gdb_s04.h5"),
+            # os.path.join(data_dir, "ani_gdb_s05.h5"),
+            # os.path.join(data_dir, "ani_gdb_s06.h5"),
+            # os.path.join(data_dir, "ani_gdb_s07.h5"),
+            # os.path.join(data_dir, "ani_gdb_s08.h5"),
         ]
 
         if calibration_file:
@@ -63,6 +63,35 @@ class DataLoader():
 
         return Xs, ys
 
+    def load_gdb8_forces(self,
+        data_dir,
+        calibration_file=None,
+        ff_train_dirs=None):
+
+        gdb_files = [
+            os.path.join(data_dir, "ani_gdb_s01.h5"),
+            os.path.join(data_dir, "ani_gdb_s02.h5"),
+            os.path.join(data_dir, "ani_gdb_s03.h5"),
+            #os.path.join(data_dir, "ani_gdb_s04.h5"),
+            #os.path.join(data_dir, "ani_gdb_s05.h5"),
+            #os.path.join(data_dir, "ani_gdb_s06.h5"),
+            #os.path.join(data_dir, "ani_gdb_s07.h5"),
+            #os.path.join(data_dir, "ani_gdb_s08.h5"),
+        ]
+
+        if calibration_file:
+            cal_map = load_calibration_file(calibration_file)
+        else:
+            cal_map = None
+
+        Xs, ys, fs = data_utils.load_hdf5_minima_gradients(
+            gdb_files,
+            calibration_map=cal_map,
+            use_fitted=self.use_fitted)
+
+        # print("fs", fs)
+
+        return Xs, ys, fs
 
     def load_gdb11(self,
         data_dir,
