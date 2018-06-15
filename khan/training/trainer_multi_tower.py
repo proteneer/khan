@@ -323,7 +323,7 @@ class TrainerMultiTower():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            print(f0.shape, f1.shape, f2.shape, f3.shape)
+                            # print(f0.shape, f1.shape, f2.shape, f3.shape)
 
                             self.tower_features.append(tf.gather(
                                 tf.concat([f0, f1, f2, f3], axis=0),

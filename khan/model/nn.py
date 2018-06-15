@@ -38,7 +38,7 @@ class AtomNN():
 
         for idx in range(1, len(layer_sizes)):
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
-            print('Layer', idx, 'input/output size', x, y)
+            # print('Layer', idx, 'input/output size', x, y)
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
             with tf.device('/cpu:0'):
