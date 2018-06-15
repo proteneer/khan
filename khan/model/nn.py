@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, precision, atom_type="", prefix=""):
+    def __init__(self, features, layer_sizes, precision, activation_fn, atom_type="", prefix=""):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -59,22 +59,8 @@ class AtomNN():
                 )
 
             A = tf.matmul(self.As[-1], W) + b
-            if idx != len(layer_sizes) - 1: # nonlinear activation functions on all layers except last
-                #A = tf.nn.selu(A) # "self-normalizing exponential" activation
-                #A = tf.nn.leaky_relu(A, alpha=0.2) # leaky RELU activation
-                #A = A * tf.nn.sigmoid(A) # "swish" activation
-                #A += (tf.sqrt(A**2+1) - 1)*0.5 # "bent identity" activation function (like smooth leaky relu - unbounded, unlike ELU)
-                #A = tf.exp(-self.freq * A**2) # Gaussian activation
-                #A = tf.sin(A)
-                #A = tf.nn.elu(A) # ELU, kind of like RELU but smooth
-                #if idx > 1: A = tf.nn.dropout(A, 0.9) # dropout
-                #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
-                #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
-                # CELU activation
-                posA = tf.cast(tf.greater_equal(A, 0), precision) * A
-                negA = tf.cast(tf.less(A, 0), precision) * A
-                alpha = 0.1
-                A = posA + alpha * ( tf.exp(negA/alpha) - 1 )
+            if idx != len(layer_sizes) - 1:
+                A = activation_fn(A)
 
             self.Ws.append(W)
             self.bs.append(b)
@@ -146,6 +132,7 @@ class MoleculeNN():
         gather_idxs,
         layer_sizes,
         precision,
+        activation_fn,
         prefix):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
@@ -176,7 +163,8 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, atom_type, prefix)
+            ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, activation_fn,
+                atom_type=atom_type, prefix=prefix)
             self.anns.append(ann)
             atom_type_nrgs.append(ann.atom_energies())
 
