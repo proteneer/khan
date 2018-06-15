@@ -155,13 +155,14 @@ def main():
             sess,
             towers=towers,
             layer_sizes=layer_sizes,
-            fit_charges=args.fit_charges
-            )
+            fit_charges=args.fit_charges,
+            precision=tf.float32 # train in single precision (james you may want to change this later)
+        )
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
             trainer.load(save_dir)
-            trainer.load_best_params()
+            trainer.load_best_params() # (james this is deprecated)
         else: # initialize new random weights. Pick the best of a few tries. 
             best_seed = 0
             best_error = 1e10

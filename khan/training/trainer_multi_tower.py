@@ -12,8 +12,6 @@ import khan
 from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from data_utils import HARTREE_TO_KCAL_PER_MOL
-
-import sklearn.model_selection
 from khan.data.dataset import RawDataset
 
 ani_mod = None
@@ -824,7 +822,10 @@ class TrainerMultiTower():
             yield self.sess.run(target_ops)
 
     # run the actual training
+    # (ytz) - this is maintained by jminuse for the sake of convenience for now.
+    # This is HOTMERGED - I'd avoid calling this code if possible, it seriously needs refactoring
     def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, max_global_epoch_count=1000):
+
         train_ops = [
             self.global_epoch_count,
             self.learning_rate,
