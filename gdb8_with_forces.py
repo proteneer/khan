@@ -18,13 +18,13 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--ani_lib', required=True, help="Location of the shared object for GPU featurization")
+    parser.add_argument('--ani-lib', required=True, help="Location of the shared object for GPU featurization")
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add_ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
     parser.add_argument('--gpus', default=1, help="Number of gpus we use")
     parser.add_argument('--train_forces', default=True, help="If we train to the forces")
 
-    parser.add_argument('--work-dir', default='~/work', help="location where work data is dumped")
+    parser.add_argument('--save-dir', default='~/work', help="location where save data is dumped")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="location where work data is dumped")
 
     args = parser.parse_args()
@@ -36,9 +36,9 @@ def main():
     initialize_module(lib_path)
 
     ANI_TRAIN_DIR = args.train_dir
-    ANI_WORK_DIR = args.work_dir
+    ANI_SAVE_DIR = args.save_dir
 
-    save_dir = os.path.join(ANI_WORK_DIR, "save")
+    save_dir = os.path.join(ANI_SAVE_DIR, "save")
 
     use_fitted = args.fitted
     add_ffdata = args.add_ffdata

@@ -3,7 +3,9 @@
 # If you'd like to build only the cpu kernel, please run: make ani_cpu
 # This will generate a cpu only ani_cpu.so file that can be run on machines with or without GPUs.
 
+# CUDA_INCLUDE_FLAGS=-I ./symlink -I ./
 CUDA_INCLUDE_FLAGS=-I /usr/local/
+
 NVCC=nvcc
 TF_CFLAGS=-I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
 TF_LFLAGS=-L/home/yutong/venv/lib/python3.5/site-packages/tensorflow -ltensorflow_framework

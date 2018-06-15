@@ -115,7 +115,7 @@ class RawDataset():
         """
         return math.ceil(self.num_mols() / batch_size)
 
-    def iterate(self, batch_size, shuffle):
+    def iterate(self, batch_size, shuffle, fuzz=None):
         """
         Generate batches of data of a fixed size.
 
@@ -127,6 +127,9 @@ class RawDataset():
         shuffle: bool
             If True then we do complete mixing of the dataset, else a stable consecutive
             ordering is assumed.
+
+        fuzz: float or None
+            If fuzz is not None 
 
         Yields
         ------
@@ -156,9 +159,14 @@ class RawDataset():
                 mol_Xs.append(mol)
                 mol_ids.extend([local_idx]*len(mol))
 
-            mol_Xs = np.concatenate(mol_Xs, axis=0)
+            mol_Xs = np.concatenate(mol_Xs, axis=0) # this is a copy operation, so mol_Xs can be modified hereafter without risk to later runs
             mol_yts = None
             mol_grads = None
+
+            if fuzz is not None:
+                mol_Xs[:, 1] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 1].shape) # fuzz the xyz coords
+                mol_Xs[:, 2] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 2].shape) # fuzz the xyz coords
+                mol_Xs[:, 3] += np.random.uniform(-fuzz, fuzz, mol_Xs[:, 3].shape) # fuzz the xyz coords
 
             if self.all_ys is not None:
                 mol_yts = []
