@@ -51,9 +51,6 @@ ani_sort.o: ani_sort.cpp
 ani_charges.o: ani_charges.cpp parameters.h
 	$(CC) ani_charges.cpp -c $(CC_FLAGS)
 
-# numeric_helpers.o: numeric_helpers.cpp
-	# $(CC) numeric_helpers.cpp -c $(CC_FLAGS)
-
 clean:
 	rm -f *.o
 

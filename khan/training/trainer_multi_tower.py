@@ -13,8 +13,10 @@ from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN, mnn_staging
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from khan.data.dataset import RawDataset
+from khan.model import activations
 
 ani_mod = None
+
 
 
 # dE/dx = (dE/df)*(df/dx)
@@ -184,6 +186,7 @@ class TrainerMultiTower():
         towers,
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
+        activation_fn=activations.celu,
         fit_charges=False):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
@@ -323,7 +326,7 @@ class TrainerMultiTower():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            print(f0.shape, f1.shape, f2.shape, f3.shape)
+                            # print(f0.shape, f1.shape, f2.shape, f3.shape)
 
                             self.tower_features.append(tf.gather(
                                 tf.concat([f0, f1, f2, f3], axis=0),
@@ -336,6 +339,7 @@ class TrainerMultiTower():
                                 atom_type_features=[f0, f1, f2, f3],
                                 gather_idxs=gather_idxs,
                                 layer_sizes=(feat_size,) + layer_sizes,
+                                activation_fn=activation_fn,
                                 prefix="near_")
 
                             # avoid duplicate parameters from later towers since the variables are shared.

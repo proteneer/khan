@@ -6,13 +6,15 @@ import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
+from khan.model import activations
+
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import multiprocessing
 import argparse
-
+import functools
 
 def main():
 
@@ -73,11 +75,16 @@ def main():
 
         print("Soft placing operations onto towers:", towers)
 
+        # activation_fn = activations.celu
+        # activation_fn = tf.nn.selu
+        activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
+
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
             precision=tf.float64,
             layer_sizes=(128, 128, 64, 1),
+            activation_fn=activation_fn,
             fit_charges=False,
         )
 
@@ -152,7 +159,7 @@ def main():
             print("==========Decreasing learning rate==========")
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
-            trainer.load_best_params()
+            # trainer.load_best_params()
 
     return
 
