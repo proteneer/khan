@@ -71,8 +71,8 @@ class AtomNN():
                 #A = tf.add( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], stddev=0.001) ) # noisy leaky RELU
                 #A = tf.multiply( tf.nn.leaky_relu(A, alpha=0.2), tf.truncated_normal(shape=[y], mean=1.0, stddev=0.01) )
                 # CELU activation
-                posA = tf.cast(tf.greater_equal(A,0),tf.float32) * A
-                negA = tf.cast(tf.less(A,0),tf.float32) * A
+                posA = tf.cast(tf.greater_equal(A,0), precision) * A
+                negA = tf.cast(tf.less(A,0), precision) * A
                 alpha = 0.1
                 A = posA + alpha * ( tf.exp(negA/alpha) - 1 )
 
