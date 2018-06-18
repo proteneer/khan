@@ -3,20 +3,23 @@
 # If you'd like to build only the cpu kernel, please run: make ani_cpu
 # This will generate a cpu only ani_cpu.so file that can be run on machines with or without GPUs.
 
-CUDA_INCLUDE_FLAGS=-I ./symlink -I ./
+# CUDA_INCLUDE_FLAGS=-I ./symlink -I ./
+CUDA_INCLUDE_FLAGS=-I /usr/local/
+
 NVCC=nvcc
-TF_CFLAGS=-I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yzhao/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
-TF_LFLAGS=-L/home/yzhao/venv/lib/python3.5/site-packages/tensorflow -ltensorflow_framework
+TF_CFLAGS=-I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include -I/home/yutong/venv/lib/python3.5/site-packages/tensorflow/include/external/nsync/public -D_GLIBCXX_USE_CXX11_ABI=0
+TF_LFLAGS=-L/home/yutong/venv/lib/python3.5/site-packages/tensorflow -ltensorflow_framework
 
 NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
 CC=g++
+# CC_FLAGS=-std=c++11 -O2 -march=native -fPIC $(TF_CFLAGS)
 CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
 CC_LINK_FLAGS=$(TF_LFLAGS)
 
 all: ani
 
 ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op_gpu.o ani_sort.o ani_charges.o ani_charges_gpu.o
-	$(CC) -shared -o ani_tiny_q.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op_gpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+	$(CC) -shared -o ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op_gpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
 ani_cpu: functor_op_cpu.o kernel_cpu.o ani_op_cpu.o ani_sort.o ani_charges.o
 	$(CC) -shared -o ani_cpu.so functor_op_cpu.o kernel_cpu.o ani_charges.o ani_op_cpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)

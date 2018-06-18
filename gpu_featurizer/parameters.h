@@ -11,53 +11,53 @@ const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, ato
 
 /* Even-smaller featurization, ani_tiny_q.so */
 
-const int MAX_ATOM_TYPES = 4;
+// const int MAX_ATOM_TYPES = 4;
 
-const int NUM_R_Rs = 8; // cut in half from 16
-const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
+// const int NUM_R_Rs = 8; // cut in half from 16
+// const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
 
-const float R_eta = 8.0; // cut in half from 16.0
-const float R_Rc = 4.6;
+// const float R_eta = 8.0; // cut in half from 16.0
+// const float R_Rc = 4.6;
 
-const float A_Rc = 3.1;
-const float A_eta = 3.0; // cut in half from 6.0
-const float A_zeta = 6.0; // reduced from 8.0 to 6.0
-const int NUM_A_THETAS = 4; // cut in half from 8
-const int NUM_A_RS = 4; // reduced from 4 to 3
+// const float A_Rc = 3.1;
+// const float A_eta = 3.0; // cut in half from 6.0
+// const float A_zeta = 6.0; // reduced from 8.0 to 6.0
+// const int NUM_A_THETAS = 4; // cut in half from 8
+// const int NUM_A_RS = 4; // reduced from 4 to 3
 
-const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MAX_ATOM_TYPES+1) / 2);
+// const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MAX_ATOM_TYPES+1) / 2);
 
-const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
+// const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
-CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
-    0.5,
-    1.0125,
-    1.525,
-    2.0375,
-    2.55,
-    3.0625,
-    3.575,
-    4.0875
-};
+// CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
+//     0.5,
+//     1.0125,
+//     1.525,
+//     2.0375,
+//     2.55,
+//     3.0625,
+//     3.575,
+//     4.0875
+// };
 
-CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
-    0.0,
-    1.5707963268,
-    3.1415926536,
-    4.7123889804,
-};
+// CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
+//     0.0,
+//     1.5707963268,
+//     3.1415926536,
+//     4.7123889804,
+// };
 
-CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
-    0.5,
-    1.3666666667,
-    2.2333333333
-};
+// CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
+//     0.5,
+//     1.3666666667,
+//     2.2333333333
+// };
 
 
 
 
 /* from github repo (ani_small) */
-/*
+
 const int MAX_ATOM_TYPES = 4;
 
 const int NUM_R_Rs = 16;
@@ -112,7 +112,7 @@ CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
     1.8000000e+00,
     2.4500000e+00,
 };
-*/
+
 
 
 
