@@ -7,5 +7,11 @@ def celu(A, alpha=0.1):
     negA = tf.cast(tf.less(A, 0), A.dtype) * A
     return posA + alpha * (tf.exp(negA/alpha) - 1)
 
+# Roitberg's original activation function
 def gaussian(A):
-	return tf.exp(-1*tf.pow(A, 2))
+    return 2*tf.exp(-0.5*tf.pow(A, 2))
+
+# softplus - ln(2), such that the function passes through the origin (helps initialization)
+def softplus_origin(A):
+    return tf.nn.softplus(A) - 0.69314718056
+

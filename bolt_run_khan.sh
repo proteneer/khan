@@ -16,5 +16,5 @@ export CUDA_VISIBLE_DEVICES=`echo $SGE_HGR_gpu | sed -e 's/gpu//g' -e 's/ /,/g'`
 echo $CUDA_VISIBLE_DEVICES
 echo $SGE_HGR_gpu
 # run python, -u means unbuffered stdout
-python -u main_2.py --work-dir saved/june12_24 --restart --gpus 0 --cpus 4 --dataset_index 5 --start_batch_size 64 --max_local_epoch_count 50 --test_size 0.2 --train_size 0.8 --ani_lib gpu_featurizer/ani_smaller_q.so
+python -u main_2.py --work-dir june18_15 --gpus 1 --cpus 1 --dataset_index 6 --testset_index 0 --start_batch_size 256 --max_local_epoch_count 20 --test_size 0.01 --train_size 0.05 --ani_lib gpu_featurizer/ani_tiny_new.so
 
