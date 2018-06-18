@@ -121,7 +121,7 @@ def average_gradients(tower_grads):
         v = grad_and_vars[0][1]
         grad_and_var = (grad, v)
         average_grads.append(grad_and_var)
-
+    
     return average_grads
 
 
@@ -188,7 +188,7 @@ class TrainerMultiTower():
             #self.optimizer = PowerSignOptimizer(learning_rate=self.learning_rate)
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
+            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.7))
             self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
@@ -325,7 +325,7 @@ class TrainerMultiTower():
         ws = self._weight_matrices()
         max_norm_ops = []
         for w in ws:
-            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 2.0, axes=1)))
+            max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 3.0, axes=1)))
         self.max_norm_ops = max_norm_ops
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
@@ -518,7 +518,8 @@ class TrainerMultiTower():
         shuffle,
         target_ops,
         batch_size,
-        before_hooks=None):
+        before_hooks=None,
+        fuzz=0.0):
         """
         Feed a dataset into the trainer under arbitrary ops.
 
@@ -573,7 +574,7 @@ class TrainerMultiTower():
 
                 n_batches = dataset.num_batches(batch_size)
 
-                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=1e-5)):
+                for b_idx, (mol_xs, mol_idxs, mol_yts) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=fuzz)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
                     if before_hooks:
                         self.sess.run(before_hooks)
@@ -617,7 +618,7 @@ class TrainerMultiTower():
             yield self.sess.run(target_ops)
 
     # run the actual training
-    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, max_global_epoch_count=1000):
+    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, min_learning_rate=1e-7, max_global_epoch_count=1000):
         train_ops = [
             self.global_epoch_count,
             self.learning_rate,
@@ -628,18 +629,19 @@ class TrainerMultiTower():
         start_time = time.time()
         best_test_score = self.eval_abs_rmse(rd_test)
         global_epoch = 0
-        while batch_size < max_batch_size and global_epoch <= max_global_epoch_count: # bigger batches as fitting goes on, makes updates less exploratory
+        while batch_size < max_batch_size and self.sess.run(self.learning_rate)>min_learning_rate and global_epoch <= max_global_epoch_count: # bigger batches as fitting goes on, makes updates less exploratory
             while self.sess.run(self.local_epoch_count) < max_local_epoch_count and global_epoch <= max_global_epoch_count:
-                for step in range(2): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
+                for step in range(1): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
                     train_step_time = time.time()
                     train_results = list( self.feed_dataset(
                         rd_train,
                         shuffle=True,
                         target_ops=train_ops,
                         batch_size=batch_size,
-                        before_hooks=self.max_norm_ops) )
+                        before_hooks=self.max_norm_ops,
+                        fuzz=1e-4) )
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                    print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
+                    #print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
@@ -671,6 +673,6 @@ class TrainerMultiTower():
             self.load_best_params()
             self.sess.run(self.decr_learning_rate)
             self.sess.run(self.reset_local_epoch_count)
-            batch_size = int(batch_size*1.2)
-            max_local_epoch_count = int(max_local_epoch_count*1.2) # increase this since higher batch size means fewer actual gradient steps per epoch
+            batch_size += 256
+            #max_local_epoch_count = int(max_local_epoch_count*1.2) # increase this since higher batch size means fewer actual gradient steps per epoch
 
