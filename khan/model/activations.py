@@ -5,7 +5,6 @@ import functools
 def celu(A, alpha=0.1):
     posA = tf.cast(tf.greater_equal(A, 0), A.dtype) * A
     negA = tf.cast(tf.less(A, 0), A.dtype) * A
-    alpha = alpha
     return posA + alpha * (tf.exp(negA/alpha) - 1)
 
 def gaussian(A):
