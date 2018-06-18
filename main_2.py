@@ -87,6 +87,11 @@ def main():
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x = pickle.load( open(pickle_file, "rb") )
+            # backwards compatibility for pickle files: add all_grads = None
+            rd_gdb11.all_grads = None
+            rd_ffneutral_mo62x.all_grads = None
+            rd_ffneutral_ccsdt.all_grads = None
+            rd_ffcharged_mo62x.all_grads = None
             #rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x, rd_gdb_opt, gdb_opt_groups = pickle.load( open(pickle_file, "rb") )
         else:
             print('gdb11')
@@ -132,7 +137,7 @@ def main():
         print("towers:", towers)
 
         #layer_sizes=(128, 128, 64, 1) # original
-        layer_sizes=(512,256,128,1)
+        layer_sizes=(1024,256,128,1)
         #layer_sizes=(256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1) # bigNN
         #layer_sizes=tuple( 20*[128] + [1] )
         #layer_sizes=(1,) # linear

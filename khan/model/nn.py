@@ -46,8 +46,7 @@ class AtomNN():
                     prefix+"W"+name,
                     (x, y),
                     precision,
-                    #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
-                    tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
+                    tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
                     trainable=True
                 )
                 b = tf.get_variable(
