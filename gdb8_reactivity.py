@@ -61,9 +61,9 @@ def main():
     parser.add_argument(
         '--activation-function',
         type=str,
-        choices=activations.ACTIVATION_FUNCTIONS.keys(),
+        choices=activations.get_all_fn_names(),
         help='choice of activation function',
-        default=activations.DEFAULT_ACTIVATION
+        default="celu"
     )
 
     parser.add_argument(
@@ -156,7 +156,7 @@ def main():
 
         print("Soft placing operations onto towers:", towers)
 
-        activation_fn = activations.ACTIVATION_FUNCTIONS[args.activation_function]
+        activation_fn = activations.get_fn_by_name(args.activation_function)
         precision = PRECISION[args.precision]
 
         trainer = TrainerMultiTower(

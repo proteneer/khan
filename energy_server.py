@@ -69,13 +69,13 @@ def parse_args(args):
     parser.add_argument(
         '--activation-function',
         type=str,
-        choices=activations.ACTIVATION_FUNCTIONS.keys(),
+        choices=activations.get_all_fn_names(),
         help='choice of activation function',
-        default=activations.DEFAULT_ACTIVATION
+        default="celu"
     )
 
     parser.add_argument(
-        "--fdiff_grad",
+        "--fdiff-grad",
         action="store_true",
         default=False,
         help="finite difference the gradients"
@@ -110,7 +110,7 @@ def main():
         layers = (128, 128, 64, 1)
         if args.deep_network:
             layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
-        activation_fn = activations.ACTIVATION_FUNCTIONS[args.activation_function]
+        activation_fn = activations.get_fn_by_name(args.activation_function)
 
         trainer = TrainerMultiTower(
             sess,
@@ -121,7 +121,7 @@ def main():
             fit_charges=args.fit_charges,
         )
 
-        trainer.load_numpy(save_file)
+        trainer.load_numpy(save_file, strict=False)
 
         s = client_server.connect_socket(args.host, args.port, server=True)
 
@@ -147,7 +147,7 @@ def main():
                 if rcv_data:
 
                     X = json.loads(rcv_data).get('X') 
-                    X_np = np.array(X, dtype=np.float32)
+                    X_np = np.array(X, dtype=np.float64)
                     rd = RawDataset([X_np], [0.0])
 
                     # should I go back to total energy?

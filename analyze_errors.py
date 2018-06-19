@@ -141,7 +141,7 @@ def main():
         layers = (128, 128, 64, 1)
         if args.deep_network:
             layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
-        activation_fn = activations.ACTIVATION_FUNCTIONS[args.activation_function]
+        activation_fn = activations.get_fn_by_name(args.activation_function)
 
         trainer = TrainerMultiTower(
             sess,
@@ -313,9 +313,9 @@ def parse_args(args):
     parser.add_argument(
         '--activation-function',
         type=str,
-        choices=activations.ACTIVATION_FUNCTIONS.keys(),
+        choices=activations.get_all_fn_names(),
         help='choice of activation function',
-        default=activations.DEFAULT_ACTIVATION
+        default="celu"
     )
     
     args = parser.parse_args()
