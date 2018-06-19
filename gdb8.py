@@ -30,6 +30,8 @@ def main():
 
     args = parser.parse_args()
 
+    print("Arguments", args)
+
     lib_path = os.path.abspath(args.ani_lib)
     print("Loading custom kernel from", lib_path)
     initialize_module(lib_path)
