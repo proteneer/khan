@@ -69,3 +69,7 @@ def normal(A, mean=0.0, std=1.0):
 
 def gaussian(A):
     return tf.exp(-1*tf.pow(A, 2))
+
+def softplus(A, shift=0.69314718056):
+    return tf.nn.softplus(A) - shift
+
