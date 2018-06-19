@@ -186,7 +186,7 @@ class TrainerMultiTower():
         towers,
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
-        activation_fn=activations.softplus_origin, #activations.celu,
+        activation_fn=activations.celu,
         fit_charges=False):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
