@@ -36,6 +36,8 @@ def main():
     print("Loading custom kernel from", lib_path)
     initialize_module(lib_path)
 
+    print("Available activation functions:", activations.get_all_fn_names())
+
     ANI_TRAIN_DIR = args.train_dir
     ANI_SAVE_DIR = args.save_dir
 
@@ -75,15 +77,17 @@ def main():
 
         print("Soft placing operations onto towers:", towers)
 
-        # activation_fn = activations.celu
+        # activation_fn = activations.get_fn_by_name("celu") # if you want to use the command line.
+        activation_fn = activations.celu # preferred
         # activation_fn = tf.nn.selu
-        activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
-        activation_fn = activations.ACTIVATION_FUNCTIONS["LEAKY_RELU"]
+        # activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
+        # activation_fn = activations.get_fn_by_name("normal", 0.5, 0.2)
+
 
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float64,
+            precision=tf.float32,
             layer_sizes=(128, 128, 64, 1),
             activation_fn=activation_fn,
             fit_charges=False,
