@@ -3,6 +3,7 @@
 
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
+from khan.model import activations
 import data_utils
 from analyze_errors import fdiff_grad
 import tensorflow as tf
@@ -30,12 +31,13 @@ def parse_args(args):
     )
 
     parser.add_argument(
-        "--work-dir",
-        default="~/work",
-        help="location of saved NN"
+        '--save-dir',
+        default='~/work',
+        help="Location of saved NN"
     )
+
     parser.add_argument(
-        "--ani_lib",
+        "--ani-lib",
         default="/Users/jacobson/projects/ani1_training/khan/gpu_featurizer/ani_cpu.so", 
         help="Location of shared object"
     )
@@ -55,21 +57,21 @@ def parse_args(args):
     )
 
     parser.add_argument(
-        '--deep_network',
+        '--deep-network',
         action='store_true',
         help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)'
     )
-
-    parser.add_argument(
-        '--gaussian-activation',
-        action='store_true',
-        help='Use gaussian activation functions'
-    )
-
     parser.add_argument(
         '--fit-charges',
         action='store_true',
         help='fit charges'
+    )
+    parser.add_argument(
+        '--activation-function',
+        type=str,
+        choices=activations.ACTIVATION_FUNCTIONS.keys(),
+        help='choice of activation function',
+        default=activations.DEFAULT_ACTIVATION
     )
 
     parser.add_argument(
@@ -97,25 +99,29 @@ def main():
     lib_path = os.path.abspath(args.ani_lib)
     initialize_module(lib_path)
 
-    save_dir = os.path.join(args.work_dir, "save")
+    save_file = os.path.join(args.save_dir, "save_file.npz")
+    if not os.path.exists(save_file):
+        raise IOError("Saved NN numpy file does not exist")
 
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
 
-        layer_sizes = (128, 128, 64, 1)
-        if args.deep_network:
-            layer_sizes = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
         towers = ["/cpu:0"]
-        print("start with layers", layer_sizes)
+        layers = (128, 128, 64, 1)
+        if args.deep_network:
+            layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        activation_fn = activations.ACTIVATION_FUNCTIONS[args.activation_function]
+
         trainer = TrainerMultiTower(
             sess,
-            towers,
-            layer_sizes=layer_sizes,
+            towers=towers,
+            precision=tf.float64,
+            layer_sizes=layers,
+            activation_fn=activation_fn,
             fit_charges=args.fit_charges,
-            gaussian_activation=args.gaussian_activation
         )
 
-        trainer.load(save_dir)
+        trainer.load_numpy(save_file)
 
         s = client_server.connect_socket(args.host, args.port, server=True)
 

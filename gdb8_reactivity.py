@@ -8,13 +8,18 @@ from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
 from khan.model import activations
 
-from data_utils import HARTREE_TO_KCAL_PER_MOL
+from data_utils import HARTREE_TO_KCAL_PER_MOL, load_reactivity_data
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
 import multiprocessing
 import argparse
 import functools
+
+PRECISION = {
+    "single": tf.float32,
+    "double": tf.float64
+}
 
 def main():
 
@@ -27,6 +32,54 @@ def main():
 
     parser.add_argument('--save-dir', default='~/work', help="Location where save data is dumped. If the folder does not exist then it will be created.")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="Location where training data is located")
+
+    parser.add_argument(
+        '--reactivity-dir',
+        default=None,
+        help='location of reactivity data'
+    )
+
+    parser.add_argument(
+        '--reactivity-test-percent',
+        default=0.25,
+        type=float,
+        help='percent of reactions to put in test set'
+    )
+
+    parser.add_argument(
+        '--deep-network',
+        action='store_true',
+        help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)'
+    )
+
+    parser.add_argument(
+        '--fit-charges',
+        action='store_true',
+        help='fit charges'
+    )
+
+    parser.add_argument(
+        '--activation-function',
+        type=str,
+        choices=activations.ACTIVATION_FUNCTIONS.keys(),
+        help='choice of activation function',
+        default=activations.DEFAULT_ACTIVATION
+    )
+
+    parser.add_argument(
+        '--convert-checkpoint',
+        default=False,
+        action='store_true',
+        help='Convert a checkpoint file to a numpy file and exit'
+    )
+
+    parser.add_argument(
+        '--precision',
+        default='single',
+        type=str,
+        choices=PRECISION.keys(),
+        help="Floating point precision of NN"
+    )
 
     args = parser.parse_args()
 
@@ -55,6 +108,30 @@ def main():
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
+    rd_rxn_test, rd_rxn_train, rd_rxn_all, rd_rxn_big = \
+        (None, None, None, None)
+    if args.reactivity_dir is not None:
+        # add training data
+        X_rxn_train, Y_rxn_train, X_rxn_test, Y_rxn_test, X_rxn_big, Y_rxn_big = \
+            load_reactivity_data(args.reactivity_dir, args.reactivity_test_percent)
+
+        X_train.extend(X_rxn_train)
+        y_train.extend(Y_rxn_train)
+
+        print("Number of reactivity points in training set {0:d}".format(len(Y_rxn_train)))
+        print("Number of reactivity points in test set {0:d}".format(len(Y_rxn_test)))
+
+        # keep reaction test set separate
+        rd_rxn_test = RawDataset(X_rxn_test, Y_rxn_test) if X_rxn_test else None
+        rd_rxn_train = RawDataset(X_rxn_train, Y_rxn_train) if X_rxn_train else None
+
+        # redundant, can be eliminated
+        rd_rxn_all = RawDataset(X_rxn_test + X_rxn_train, Y_rxn_test + Y_rxn_train)
+        
+        # cannot currently handle this in test either
+        # everything over 32 atoms
+        rd_rxn_big = RawDataset(X_rxn_big, Y_rxn_big)
+
     batch_size = 1024
 
     config = tf.ConfigProto(allow_soft_placement=True)
@@ -73,21 +150,31 @@ def main():
         else:
             towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
 
+        layers = (128, 128, 64, 1)
+        if args.deep_network:
+            layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+
         print("Soft placing operations onto towers:", towers)
 
-        # activation_fn = activations.celu
-        # activation_fn = tf.nn.selu
-        activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
-        activation_fn = activations.ACTIVATION_FUNCTIONS["LEAKY_RELU"]
+        activation_fn = activations.ACTIVATION_FUNCTIONS[args.activation_function]
+        precision = PRECISION[args.precision]
 
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float64,
-            layer_sizes=(128, 128, 64, 1),
+            precision=precision,
+            layer_sizes=layers,
             activation_fn=activation_fn,
-            fit_charges=False,
+            fit_charges=args.fit_charges,
         )
+
+        if args.convert_checkpoint:
+            print("Converting saved network to numpy")
+            save_dir = os.path.join(args.save_dir, "save")
+            trainer.load(save_dir)
+            trainer.save_numpy(save_file)
+            print("Complete, exiting")
+            return
 
         if os.path.exists(save_file):
             print("Restoring existing model from", save_file)
@@ -150,6 +237,26 @@ def main():
 
                     best_test_score = test_abs_rmse
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
+
+                    # info about reactivity training
+                    rxn_pairs = [
+                        (rd_rxn_train, "train"),
+                        (rd_rxn_test, "test"),
+                        (rd_rxn_all, "all"),
+                        (rd_rxn_big, "big")
+                    ]
+                    for rd, name in rxn_pairs: 
+                        if rd is not None:
+                            rxn_abs_rmse = trainer.eval_abs_rmse(rd)
+                            print(
+                                ' | reactivity abs rmse ({0:s})'.format(name),
+                                "{0:.2f} kcal/mol | ".format(rxn_abs_rmse),
+                                end=''
+                            )
+                            # should really be a weighted ave
+                            if name == "test":
+                                best_test_score += rxn_abs_rmse
+
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
