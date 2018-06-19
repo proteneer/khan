@@ -36,6 +36,8 @@ def main():
     print("Loading custom kernel from", lib_path)
     initialize_module(lib_path)
 
+    print("Available activation functions:", activations.get_all_fn_names())
+
     ANI_TRAIN_DIR = args.train_dir
     ANI_SAVE_DIR = args.save_dir
 
