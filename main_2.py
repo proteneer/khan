@@ -60,7 +60,7 @@ def main():
         ANI_TRAIN_DIR = args.train_dir
         ANI_WORK_DIR = args.work_dir
         GRAPH_DB_TRAIN_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/train'
-        GRAPH_DB_TEST_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/test'
+        GRAPH_DB_TEST_DIR = '/nfs/working/scidev/stevenso/learning/khan/graphdb_xyz/xyz/test/'
         train_size = float(args.train_size)
         test_size = float(args.test_size)
 
@@ -82,32 +82,48 @@ def main():
 
         print("------------Load evaluation data--------------")
         
-        pickle_files = ['eval_new_graphdb.pickle', 'eval_data_old_fftest.pickle', 'eval_data_graphdb.pickle']
+        pickle_files = ['eval_new_graphdb.pickle', 'eval_data_old_fftest.pickle', 'eval_data_graphdb.pickle', 'rotamer_gdb_opt.pickle']
         pickle_file = pickle_files[ int(args.testset_index) ]
         if os.path.isfile(pickle_file):
             print('Loading pickle from', pickle_file)
             rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x = pickle.load( open(pickle_file, "rb") )
+            # backwards compatibility for pickle files: add all_grads = None
+            rd_gdb11.all_grads = None
+            rd_ffneutral_mo62x.all_grads = None
+            rd_ffneutral_ccsdt.all_grads = None
+            rd_ffcharged_mo62x.all_grads = None
+            #rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x, rd_gdb_opt, gdb_opt_groups = pickle.load( open(pickle_file, "rb") )
+            pickle.dump( (rd_gdb11,
+                          rd_ffneutral_mo62x, ffneutral_groups_mo62x,
+                          rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, 
+                          rd_ffcharged_mo62x, ffcharged_groups_mo62x), open( pickle_file, "wb" ) )
         else:
             print('gdb11')
             xs, ys = data_loader.load_gdb11(ANI_TRAIN_DIR, CALIBRATION_FILE_TEST)
             rd_gdb11 = RawDataset(xs, ys)
-            print('ff')
-            if 'fftest' in pickle_file:
-                xs, ys, ffneutral_groups_mo62x = data_loader.load_ff(ROTAMER_TEST_DIR)
-            elif 'graphdb' in pickle_file:
-                xs, ys, ffneutral_groups_mo62x = data_loader.load_ff(GRAPH_DB_TEST_DIR)     
+            xs, ys, ffneutral_groups_mo62x = data_loader.load_ff(GRAPH_DB_TEST_DIR)     
             rd_ffneutral_mo62x = RawDataset(xs, ys)
             xs, ys, ffneutral_groups_ccsdt = data_loader.load_ff(CCSDT_ROTAMER_TEST_DIR)
             rd_ffneutral_ccsdt = RawDataset(xs, ys)
             xs, ys, ffcharged_groups_mo62x =  data_loader.load_ff(CHARGED_ROTAMER_TEST_DIR)
             rd_ffcharged_mo62x = RawDataset(xs, ys)
+            xs, ys, gdb_opt_groups = data_loader.load_ff('haoyu_opt/xyz/')
+            rd_gdb_opt = RawDataset(xs, ys)
             print('Pickling data...')
-            pickle.dump( (rd_gdb11, rd_ffneutral_mo62x, ffneutral_groups_mo62x, rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, rd_ffcharged_mo62x, ffcharged_groups_mo62x), open( pickle_file, "wb" ) )
+            pickle.dump( (rd_gdb11,
+                          rd_ffneutral_mo62x, ffneutral_groups_mo62x,
+                          rd_ffneutral_ccsdt, ffneutral_groups_ccsdt, 
+                          rd_ffcharged_mo62x, ffcharged_groups_mo62x,
+                          rd_gdb_opt, gdb_opt_groups), open( pickle_file, "wb" ) )
 
+        eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers", "GDB Opt"]
+        #eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x, gdb_opt_groups]
+        #eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x, rd_gdb_opt]
         eval_names    = ["Neutral Rotamers", "Neutral Rotamers CCSDT", "Charged Rotamers"]
         eval_groups   = [ffneutral_groups_mo62x, ffneutral_groups_ccsdt, ffcharged_groups_mo62x]
         eval_datasets = [rd_ffneutral_mo62x, rd_ffneutral_ccsdt, rd_ffcharged_mo62x]
-        
+
+
         # This training code implements cross-validation based training, whereby we determine convergence on a given
         # epoch depending on the cross-validation error for a given validation set. When a better cross-validation
         # score is detected, we save the model's parameters as the putative best found parameters. If after more than
@@ -125,7 +141,8 @@ def main():
         print("towers:", towers)
 
         #layer_sizes=(128, 128, 64, 1) # original
-        layer_sizes=(256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1) # bigNN
+        layer_sizes=(512,256,128,1)
+        #layer_sizes=(256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1) # bigNN
         #layer_sizes=tuple( 20*[128] + [1] )
         #layer_sizes=(1,) # linear
         print('layer_sizes:', layer_sizes)
@@ -157,24 +174,13 @@ def main():
             layer_sizes=layer_sizes,
             fit_charges=args.fit_charges,
             precision=tf.float32 # train in single precision (james you may want to change this later)
+            #precision=tf.float64
         )
 
         if os.path.exists(save_dir):
             print("Restoring existing model from", save_dir)
-            trainer.load(save_dir)
-            trainer.load_best_params() # (james this is deprecated)
-        else: # initialize new random weights. Pick the best of a few tries. 
-            best_seed = 0
-            best_error = 1e10
-            for attempt_count in range(0):
-                tf.set_random_seed(attempt_count)
-                trainer.initialize() # initialize to random variables
-                test_err = trainer.eval_abs_rmse(rd_test)
-                print('Initial error from random weights: %.1f kcal/mol' % test_err )
-                if test_err < best_error:
-                    best_seed = attempt_count
-                    best_error = test_err
-            tf.set_random_seed(best_seed)
+            trainer.load_numpy(save_dir+'/best.npz')
+        else: # initialize new random parameters
             trainer.initialize()
 
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
