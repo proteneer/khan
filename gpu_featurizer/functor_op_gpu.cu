@@ -70,18 +70,19 @@ struct AniFunctor<GPUDevice, NumericType> {
       float *X_feat_out_C,
       float *X_feat_out_N,
       float *X_feat_out_O,
-      const int *acs) {
+      const int *acs,
+      AniParams params) {
 
-      gpuErrchk(cudaMemsetAsync(X_feat_out_H, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
-      gpuErrchk(cudaMemsetAsync(X_feat_out_C, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
-      gpuErrchk(cudaMemsetAsync(X_feat_out_N, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
-      gpuErrchk(cudaMemsetAsync(X_feat_out_O, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(int), d.stream()));
+      gpuErrchk(cudaMemsetAsync(X_feat_out_H, 0, acs[0]*params.total_feature_size()*sizeof(int), d.stream()));
+      gpuErrchk(cudaMemsetAsync(X_feat_out_C, 0, acs[1]*params.total_feature_size()*sizeof(int), d.stream()));
+      gpuErrchk(cudaMemsetAsync(X_feat_out_N, 0, acs[2]*params.total_feature_size()*sizeof(int), d.stream()));
+      gpuErrchk(cudaMemsetAsync(X_feat_out_O, 0, acs[3]*params.total_feature_size()*sizeof(int), d.stream()));
 
       if(num_mols > 0) {
         // gpu kernel's can't be launched with a zero blockdim
         featurize<<<num_mols, 32, 0, d.stream()>>>(
           Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-          X_feat_out_H, X_feat_out_C, X_feat_out_N, X_feat_out_O);
+          X_feat_out_H, X_feat_out_C, X_feat_out_N, X_feat_out_O, params);
         gpuErrchk(cudaPeekAtLastError());
       }
     }

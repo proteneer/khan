@@ -16,7 +16,8 @@ void featurize_cpu(
     NumericType *X_feat_Hs,
     NumericType *X_feat_Cs,
     NumericType *X_feat_Ns,
-    NumericType *X_feat_Os);
+    NumericType *X_feat_Os,
+    AniParams params);
 
 template<typename NumericType>
 void featurize_grad_cpu(
@@ -34,7 +35,8 @@ void featurize_grad_cpu(
     const NumericType *O_grads,
     NumericType *X_grads,
     NumericType *Y_grads,
-    NumericType *Z_grads);
+    NumericType *Z_grads,
+    AniParams params);
 
 template<typename NumericType>
 void featurize_grad_inverse(
@@ -49,10 +51,10 @@ void featurize_grad_inverse(
     const NumericType *X_grads,
     const NumericType *Y_grads,
     const NumericType *Z_grads, 
-
     NumericType *H_grads,
     NumericType *C_grads,
     NumericType *N_grads,
-    NumericType *O_grads);
+    NumericType *O_grads,
+    AniParams params);
 
 #endif

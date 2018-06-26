@@ -30,16 +30,16 @@ inline __device__ float f_C(float r_ij, float r_c) {
 // Linearizes the diagonal-inclusive upper right
 // triangle of the symmetric ranks 0 and 1 of a rank-4 tensor
 // into a linear index 
-inline __device__ int linearize(int i, int j, int k, int l) {
+inline __device__ int linearize(int i, int j, int k, int l, AniParams params) {
     if(j < i) {
         float tmp = i;
         i = j;
         j = tmp;
     }
 
-    const auto N = MAX_ATOM_TYPES;
-    const auto K = NUM_A_THETAS;
-    const auto L = NUM_A_RS;
+    const auto N = params.max_types;
+    const auto K = params.Num_A_thetas;
+    const auto L = params.Num_A_Rs;
 
     int basis = (N*(N-1)/2 - (N-i) * (N-i-1)/2 +j);
     
@@ -84,12 +84,17 @@ __global__ void featurize(
     float *X_feat_out_H,
     float *X_feat_out_C,
     float *X_feat_out_N,
-    float *X_feat_out_O) {
+    float *X_feat_out_O,
+    AniParams params) {
 
     int mol_idx = blockIdx.x;
     int num_atoms = mol_atom_count[blockIdx.x];
     int block_size = blockDim.x;
     int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
+
+    const size_t angular_feature_size = params.Num_A_Rs * params.Num_A_thetas * (params.max_types * (params.max_types+1) / 2);
+    const size_t radial_feature_size = params.max_types * params.Num_R_Rs;
+    const size_t total_feature_size = angular_feature_size + radial_feature_size;
 
     for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
 
@@ -127,8 +132,8 @@ __global__ void featurize(
             X_feat_out_i = X_feat_out_O;
         }
       
-        float *radial_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + 0;
-        float *angular_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
+        float *radial_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*total_feature_size + 0;
+        float *angular_feature_buffer_i = X_feat_out_i + scatter_idxs[g_atom_idx_i]*total_feature_size + radial_feature_size;
 
         for(int j=0; j < num_atoms; j++) {
 
@@ -160,25 +165,25 @@ __global__ void featurize(
                 X_feat_out_j = X_feat_out_O;
             }
 
-            float *radial_feature_buffer_j = X_feat_out_j + scatter_idxs[g_atom_idx_j]*TOTAL_FEATURE_SIZE + 0;
+            float *radial_feature_buffer_j = X_feat_out_j + scatter_idxs[g_atom_idx_j]*total_feature_size + 0;
             // float *radial_feature_buffer_j = X_feat_j + g_atom_idx_j*TOTAL_FEATURE_SIZE + 0;
             // float *angular_feature_buffer_j = X_feat_out + g_atom_idx_j*TOTAL_FEATURE_SIZE + RADIAL_FEATURE_SIZE;
 
 
             // if(g_atom_idx_i == 0) {
                 // printf("gpu j %d %f\n", j, r_ij);
-                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);
-                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx);
+                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx);
+                // printf("summand, offset, %f, %d\n", summand, scatter_idxs[g_atom_idx_i]*TOTAL_FEATURE_SIZE + atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx);
             // }
 
             // radial features
-            if(r_ij < R_Rc && local_atom_idx < j) {
-                for(int r_idx = 0; r_idx < NUM_R_Rs; r_idx++) {
-                    float summand = expf(-R_eta * powf(r_ij - R_Rs[r_idx], 2.0)) * f_C(r_ij, R_Rc);
+            if(r_ij < params.R_Rc && local_atom_idx < j) {
+                for(int r_idx = 0; r_idx < params.Num_R_Rs; r_idx++) {
+                    float summand = expf(-params.R_eta * powf(r_ij - params.R_Rs[r_idx], 2.0)) * f_C(r_ij, params.R_Rc);
 
                     // exploit symmetry of the atomic adds
-                    auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * NUM_R_Rs + r_idx, summand);
-                    auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * NUM_R_Rs + r_idx, summand);
+                    auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx, summand);
+                    auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * params.Num_R_Rs + r_idx, summand);
 
                     //if(isnan(res1) || isinf(res1)) {
                     //    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
@@ -195,19 +200,16 @@ __global__ void featurize(
                 }
             }
 
-            float A_f_C_ij = f_C(r_ij, A_Rc);
+            float A_f_C_ij = f_C(r_ij, params.A_Rc);
 
 
-            if(r_ij < A_Rc) {
+            if(r_ij < params.A_Rc) {
 
                 for(size_t k=j+1; k < num_atoms; k++) {
 
                     if(local_atom_idx == j || local_atom_idx == k || j == k) {
                         continue;
                     }
-
-                    // const int an_i = atomic_nums[local_atom_idx];
-
 
                     int g_atom_idx_k = mol_offsets[mol_idx]+k;
 
@@ -224,7 +226,7 @@ __global__ void featurize(
 
                     float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
 
-                    if(r_ik < A_Rc) {
+                    if(r_ik < params.A_Rc) {
 
                         // TODO(YTZ): replace with arctan2 trick
 
@@ -243,15 +245,15 @@ __global__ void featurize(
                         }
 
                         // printf("gpu tijk %d %d %d %f\n", local_atom_idx, j, k, theta_ijk);
-                        float A_f_C_ik = f_C(r_ik, A_Rc);
-                        for(int t=0; t < NUM_A_THETAS; t++) {
-                            for(int s=0; s < NUM_A_RS; s++) {
+                        float A_f_C_ik = f_C(r_ik, params.A_Rc);
+                        for(int t=0; t < params.Num_A_thetas; t++) {
+                            for(int s=0; s < params.Num_A_Rs; s++) {
                                 // (TODO: ytz) do 2*(1-A_Zeta) at the end
-                                float summand = powf(2, 1-A_zeta) * powf(1+cosf(theta_ijk - A_thetas[t]), A_zeta) * expf(-A_eta*powf((r_ij + r_ik)/2 - A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
+                                float summand = powf(2, 1-params.A_zeta) * powf(1+cosf(theta_ijk - params.A_thetas[t]), params.A_zeta) * expf(-params.A_eta*powf((r_ij + r_ik)/2 - params.A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
                                 // printf("summand: %f, \n", summand);
                                 // printf("scatter_idxs[g_atom_idx_i]: %d, linearize: %d\n", scatter_idxs[g_atom_idx_i], linearize(an_j, an_k, t, s));
                                 // printf("i,j,k,t,s %d %d %d %d %d %d\n", g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, at_idx, ar_idx, linearize(j_type, k_type, at_idx, ar_idx))
-                                auto res = atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s), summand);
+                                auto res = atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s, params), summand);
 
                                 // if(isnan(res) || isinf(res)) {
                                 //     printf("WTF ANGULAR SUMMAND NAN/INF: %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",

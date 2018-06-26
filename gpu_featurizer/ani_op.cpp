@@ -1,8 +1,3 @@
-// compiler flags:
-// compile cpu: g++ -fPIC -O3 -Ofast -march=native -c --std=c++11 kernel_cpu.cpp
-
-// nvcc -std=c++11 -arch=sm_61 -shared ani_op.cc.cu kernel.cu -o ani.so ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -I ~/Code/cub-1.8.0/ -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 -I ~/cuda_cluster_pkgs_rhel6/usr/local/ --expt-relaxed-constexpr -ltensorflow_framework
-
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -10,6 +5,7 @@
 
 #include <chrono>
 
+#include "memcpy.h"
 #include "parameters.h"
 #include "functor_op.h"
 
@@ -18,13 +14,82 @@ using namespace tensorflow;
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-template<typename Device, typename NumericType>
-class AniCombined : public OpKernel {
+
+template<typename Device>
+class AniBase : public OpKernel {
 
  public:
-  explicit AniCombined(OpKernelConstruction* context) : OpKernel(context) {
+  explicit AniBase(OpKernelConstruction* context) : OpKernel(context) {
 
+    OP_REQUIRES_OK(context, context->GetAttr("n_types", &n_types_));
+    OP_REQUIRES_OK(context, context->GetAttr("R_Rc", &R_Rc_));
+    OP_REQUIRES_OK(context, context->GetAttr("R_eta", &R_eta_));
+    OP_REQUIRES_OK(context, context->GetAttr("A_Rc", &A_Rc_));
+    OP_REQUIRES_OK(context, context->GetAttr("A_eta", &A_eta_));
+    OP_REQUIRES_OK(context, context->GetAttr("A_zeta", &A_zeta_));
+
+    // (ytz) there's gotta be a cleaner way to do this.
+    std::vector<float> tmp_R_Rs;
+    OP_REQUIRES_OK(context, context->GetAttr("R_Rs", &tmp_R_Rs));
+
+    std::vector<float> tmp_A_thetas;
+    OP_REQUIRES_OK(context, context->GetAttr("A_thetas", &tmp_A_thetas));
+
+    std::vector<float> tmp_A_Rs;
+    OP_REQUIRES_OK(context, context->GetAttr("A_Rs", &tmp_A_Rs));
+
+    context->allocate_persistent(DT_FLOAT, {tmp_R_Rs.size()}, &R_Rs_, nullptr);
+    context->allocate_persistent(DT_FLOAT, {tmp_A_thetas.size()}, &A_thetas_, nullptr);
+    context->allocate_persistent(DT_FLOAT, {tmp_A_Rs.size()}, &A_Rs_, nullptr);
+
+    device_memcpy<Device>(R_Rs_.AccessTensor(context)->flat<float>().data(), tmp_R_Rs);
+    device_memcpy<Device>(A_thetas_.AccessTensor(context)->flat<float>().data(), tmp_A_thetas);
+    device_memcpy<Device>(A_Rs_.AccessTensor(context)->flat<float>().data(), tmp_A_Rs);
+
+
+    // todo: declare const-ness etc.
+    params.max_types = n_types_;
+    params.R_Rc = R_Rc_;
+    params.R_eta = R_eta_;
+    params.A_Rc = A_Rc_;
+    params.A_eta = A_eta_;
+    params.A_zeta = A_zeta_;
+    params.Num_R_Rs = R_Rs_.NumElements();
+    params.Num_A_thetas = A_thetas_.NumElements();
+    params.Num_A_Rs = A_Rs_.NumElements();
+
+    params.R_Rs = R_Rs_.AccessTensor(context)->flat<float>().data();
+    params.A_thetas = A_thetas_.AccessTensor(context)->flat<float>().data();
+    params.A_Rs = A_Rs_.AccessTensor(context)->flat<float>().data();
+ }
+
+ protected:
+
+  const AniParams &getAniParams() const {
+    return params;
   }
+
+
+ private:
+  int n_types_;
+  float R_Rc_;
+  float R_eta_;
+  float A_Rc_;
+  float A_eta_;
+  float A_zeta_;
+  PersistentTensor R_Rs_;
+  PersistentTensor A_thetas_;
+  PersistentTensor A_Rs_;
+
+  AniParams params;
+
+};
+
+template<typename Device, typename NumericType>
+class AniCombined : public AniBase<Device> {
+
+ public:
+  explicit AniCombined(OpKernelConstruction* context) : AniBase<Device>(context) {}
 
   void Compute(OpKernelContext* context) override {
 
@@ -51,24 +116,28 @@ class AniCombined : public OpKernel {
  
     const int *acs = input_ACs.flat<int>().data(); // safe since we declare this to be on the host.
 
+    // this-> is required in the case of template inheritance.
+    const AniParams& params = this->getAniParams();
+    const size_t total_feat_size = params.total_feature_size();
+
     OP_REQUIRES_OK(context, context->allocate_output(
       "h_feat",
-      TensorShape({acs[0]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[0]*total_feat_size}),
       &X_feat_H)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "c_feat",
-      TensorShape({acs[1]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[1]*total_feat_size}),
       &X_feat_C)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "n_feat",
-      TensorShape({acs[2]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[2]*total_feat_size}),
       &X_feat_N)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "o_feat",
-      TensorShape({acs[3]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[3]*total_feat_size}),
       &X_feat_O)
     );
 
@@ -86,10 +155,22 @@ class AniCombined : public OpKernel {
       X_feat_C->flat<NumericType>().data(),
       X_feat_N->flat<NumericType>().data(),
       X_feat_O->flat<NumericType>().data(),
-      acs
+      acs,
+      params
     );
 
   }
+
+  private:
+    int n_types_;
+    float R_Rc_;
+    float R_eta_;
+    float A_Rc_;
+    float A_eta_;
+    float A_zeta_;
+    PersistentTensor R_Rs_;
+    PersistentTensor A_thetas_;
+    PersistentTensor A_Rs_;
 };
 
 REGISTER_OP("Featurize")
@@ -105,8 +186,18 @@ REGISTER_OP("Featurize")
   .Output("c_feat: FT")
   .Output("n_feat: FT")
   .Output("o_feat: FT")
-  .Attr("feature_size: int = "+std::to_string(TOTAL_FEATURE_SIZE))
+  // .Attr("feature_size: int = "+std::to_string(TOTAL_FEATURE_SIZE)) // calling code can compute this explicitly
   .Attr("FT: {float32, float64}")
+  .Attr("n_types: int")
+  .Attr("R_Rs: list(float)")
+  .Attr("A_thetas: list(float)")
+  .Attr("A_Rs: list(float)")
+  .Attr("R_eta: float")
+  .Attr("R_Rc: float")
+  .Attr("A_Rc: float")
+  .Attr("A_eta: float")
+  .Attr("A_zeta: float")
+
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
     // the output shapes are determined by the number of elements in acs
     // c->set_output(0, c->input(0));
@@ -119,15 +210,14 @@ REGISTER_OP("Featurize")
 
 
 template<typename Device, typename NumericType>
-class AniCombinedGrad : public OpKernel {
+class AniCombinedGrad : public AniBase<Device> {
 
  public:
-  explicit AniCombinedGrad(OpKernelConstruction* context) : OpKernel(context) {
+  explicit AniCombinedGrad(OpKernelConstruction* context) : AniBase<Device>(context) {
 
   }
 
   void Compute(OpKernelContext* context) override {
-
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -154,6 +244,9 @@ class AniCombinedGrad : public OpKernel {
     Tensor* Z_grads = nullptr;
  
     const int *acs = input_ACs.flat<int>().data(); // safe since we declare this to be on the host.
+
+    // this-> is required in the case of template inheritance.
+    const AniParams& params = this->getAniParams();
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "x_grads",
@@ -190,7 +283,8 @@ class AniCombinedGrad : public OpKernel {
       X_grads->flat<NumericType>().data(),
       Y_grads->flat<NumericType>().data(),
       Z_grads->flat<NumericType>().data(),
-      acs
+      acs,
+      params
     );
 
   }
@@ -213,8 +307,16 @@ REGISTER_OP("FeaturizeGrad")
   .Output("x_grads: FT")
   .Output("y_grads: FT")
   .Output("z_grads: FT")
-  .Attr("feature_size: int = "+std::to_string(TOTAL_FEATURE_SIZE))
   .Attr("FT: {float32, float64}")
+  .Attr("n_types: int")
+  .Attr("R_Rs: list(float)")
+  .Attr("A_thetas: list(float)")
+  .Attr("A_Rs: list(float)")
+  .Attr("R_eta: float")
+  .Attr("R_Rc: float")
+  .Attr("A_Rc: float")
+  .Attr("A_eta: float")
+  .Attr("A_zeta: float")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
 
     return Status::OK();
@@ -222,10 +324,10 @@ REGISTER_OP("FeaturizeGrad")
 
 
 template<typename Device, typename NumericType>
-class AniCombinedGradInverse : public OpKernel {
+class AniCombinedGradInverse : public AniBase<Device> {
 
  public:
-  explicit AniCombinedGradInverse(OpKernelConstruction* context) : OpKernel(context) {
+  explicit AniCombinedGradInverse(OpKernelConstruction* context) : AniBase<Device>(context) {
 
   }
 
@@ -258,28 +360,30 @@ class AniCombinedGradInverse : public OpKernel {
     Tensor* output_O_grads = nullptr;
  
     const int *acs = input_ACs.flat<int>().data(); // safe since we declare this to be on the host.
+    const AniParams& params = this->getAniParams();
+    const size_t total_feat_size = params.total_feature_size();
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "h_grads",
-      TensorShape({acs[0]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[0]*total_feat_size}),
       &output_H_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "c_grads",
-      TensorShape({acs[1]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[1]*total_feat_size}),
       &output_C_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "n_grads",
-      TensorShape({acs[2]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[2]*total_feat_size}),
       &output_N_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "o_grads",
-      TensorShape({acs[3]*TOTAL_FEATURE_SIZE}),
+      TensorShape({acs[3]*total_feat_size}),
       &output_O_grads)
     );
 
@@ -300,7 +404,8 @@ class AniCombinedGradInverse : public OpKernel {
       output_C_grads->flat<NumericType>().data(),
       output_N_grads->flat<NumericType>().data(),
       output_O_grads->flat<NumericType>().data(),
-      acs
+      acs,
+      params
     );
   }
 };
@@ -323,9 +428,16 @@ REGISTER_OP("FeaturizeGradInverse")
   .Output("n_grads: FT")
   .Output("o_grads: FT")
   .Attr("FT: {float32, float64}")
-  .Attr("feature_size: int = "+std::to_string(TOTAL_FEATURE_SIZE))
+  .Attr("n_types: int")
+  .Attr("R_Rs: list(float)")
+  .Attr("A_thetas: list(float)")
+  .Attr("A_Rs: list(float)")
+  .Attr("R_eta: float")
+  .Attr("R_Rc: float")
+  .Attr("A_Rc: float")
+  .Attr("A_eta: float")
+  .Attr("A_zeta: float")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
-
     return Status::OK();
   });
 

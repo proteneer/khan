@@ -5,6 +5,11 @@
 #include "parameters.h"
 #include "kernel_cpu.h"
 
+// un __aligned__ struct but doesn't really matter since
+// the first 8 members are 32-bits and the last 3
+// are 64-bit pointers
+
+
 template <typename Device, typename NumericType>
 struct AniFunctor {
   void operator()(
@@ -21,7 +26,8 @@ struct AniFunctor {
     NumericType *X_feat_out_C,
     NumericType *X_feat_out_N,
     NumericType *X_feat_out_O,
-    const int *acs);
+    const int *acs,
+    AniParams params);
 };
 
 template <typename Device, typename NumericType>
@@ -43,7 +49,8 @@ struct AniGrad {
     NumericType *X_grads,
     NumericType *Y_grads,
     NumericType *Z_grads,
-    const int *acs);
+    const int *acs,
+    AniParams params);
 };
 
 template <typename Device, typename NumericType>
@@ -65,7 +72,8 @@ struct AniGradInverse {
     NumericType *output_C_grads,
     NumericType *output_N_grads,
     NumericType *output_O_grads,
-    const int *acs);
+    const int *acs,
+    AniParams params);
 };
 
 

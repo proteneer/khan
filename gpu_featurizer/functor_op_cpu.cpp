@@ -22,20 +22,23 @@ struct AniFunctor<CPUDevice, NumericType> {
         const int *mol_atom_count,
         const int num_mols, // actually equal to blockDim.x
         const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
-        NumericType *X_feat_out_H_dbl,
-        NumericType *X_feat_out_C_dbl,
-        NumericType *X_feat_out_N_dbl,
-        NumericType *X_feat_out_O_dbl,
-        const int *acs) {
+        NumericType *X_feat_out_H,
+        NumericType *X_feat_out_C,
+        NumericType *X_feat_out_N,
+        NumericType *X_feat_out_O,
+        const int *acs,
+        AniParams params) {
 
-        memset(X_feat_out_H_dbl, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-        memset(X_feat_out_C_dbl, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-        memset(X_feat_out_N_dbl, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-        memset(X_feat_out_O_dbl, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
+        const size_t total_feat_size = params.total_feature_size();
+
+        memset(X_feat_out_H, 0, acs[0]*total_feat_size*sizeof(NumericType));
+        memset(X_feat_out_C, 0, acs[1]*total_feat_size*sizeof(NumericType));
+        memset(X_feat_out_N, 0, acs[2]*total_feat_size*sizeof(NumericType));
+        memset(X_feat_out_O, 0, acs[3]*total_feat_size*sizeof(NumericType));
 
         featurize_cpu<NumericType>(
           Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
-          X_feat_out_H_dbl, X_feat_out_C_dbl, X_feat_out_N_dbl, X_feat_out_O_dbl);
+          X_feat_out_H, X_feat_out_C, X_feat_out_N, X_feat_out_O, params);
     }
 };
 
@@ -62,8 +65,8 @@ struct AniGrad<CPUDevice, NumericType> {
         NumericType *X_grads_dbl,
         NumericType *Y_grads_dbl,
         NumericType *Z_grads_dbl,
-        const int *acs
-        ) {
+        const int *acs,
+        AniParams params) {
 
         const int total_num_atoms = acs[0] + acs[1] + acs[2] + acs[3];
 
@@ -74,8 +77,7 @@ struct AniGrad<CPUDevice, NumericType> {
         featurize_grad_cpu<NumericType>(
           Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
           input_H_grads, input_C_grads, input_N_grads, input_O_grads,
-          X_grads_dbl, Y_grads_dbl, Z_grads_dbl
-        );
+          X_grads_dbl, Y_grads_dbl, Z_grads_dbl, params);
     }
 };
 
@@ -102,17 +104,20 @@ struct AniGradInverse<CPUDevice, NumericType> {
     NumericType *output_C_grads,
     NumericType *output_N_grads,
     NumericType *output_O_grads,
-    const int *acs) {
+    const int *acs,
+    AniParams params) {
 
-    memset(output_H_grads, 0, acs[0]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-    memset(output_C_grads, 0, acs[1]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-    memset(output_N_grads, 0, acs[2]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
-    memset(output_O_grads, 0, acs[3]*TOTAL_FEATURE_SIZE*sizeof(NumericType));
+    const size_t total_feat_size = params.total_feature_size();
+
+    memset(output_H_grads, 0, acs[0]*total_feat_size*sizeof(NumericType));
+    memset(output_C_grads, 0, acs[1]*total_feat_size*sizeof(NumericType));
+    memset(output_N_grads, 0, acs[2]*total_feat_size*sizeof(NumericType));
+    memset(output_O_grads, 0, acs[3]*total_feat_size*sizeof(NumericType));
 
     featurize_grad_inverse<NumericType>(
       Xs, Ys, Zs, atomic_nums, mol_offsets, mol_atom_count, num_mols, scatter_idxs,
       X_grads, Y_grads, Z_grads,
-      output_H_grads, output_C_grads, output_N_grads, output_O_grads);
+      output_H_grads, output_C_grads, output_N_grads, output_O_grads, params);
   }
 };
 

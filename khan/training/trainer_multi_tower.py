@@ -21,11 +21,12 @@ ani_mod = None
 
 # dE/dx = (dE/df)*(df/dx)
 @ops.RegisterGradient("Featurize")
-# featurization takes in (x,y,z,a,offsets,input gradients for hcno) and returns a collected dx,dy,dz
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     x,y,z,a,mo,macs,sis,acs = op.inputs
-    fh, fc, fn, fo = op.outputs
-    dLdx, dLdy, dLdz = ani_mod.featurize_grad(
+
+    # print(dir(op))
+    # assert 0
+    dx, dy, dz = ani_mod.featurize_grad(
         x,
         y,
         z,
@@ -37,19 +38,28 @@ def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
         grad_hs,
         grad_cs,
         grad_ns,
-        grad_os
-    )
+        grad_os,
+        n_types=op.get_attr("n_types"),
+        R_Rc=op.get_attr("R_Rc"),
+        R_eta=op.get_attr("R_eta"),
+        A_Rc=op.get_attr("A_Rc"),
+        A_eta=op.get_attr("A_eta"),
+        A_zeta=op.get_attr("A_zeta"),
+        R_Rs=op.get_attr("R_Rs"),
+        A_thetas=op.get_attr("A_thetas"),
+        A_Rs=op.get_attr("A_Rs"))
 
     return [
-        dLdx,
-        dLdy,
-        dLdz,
-        None, # dLda
-        None, # dLdmo
-        None, # dLdmacs
-        None, # dLdsis
-        None, # dLdacs
+        dx,
+        dy,
+        dz,
+        None,
+        None,
+        None,
+        None,
+        None,
     ]
+
 
 # let g = a * b where:
 # g = dE/dx
@@ -75,11 +85,21 @@ def _feat_grad_grad(op, dLdx, dLdy, dLdz):
         acs,
         dLdx,
         dLdy,
-        dLdz
+        dLdz,
+        n_types=op.get_attr("n_types"),
+        R_Rc=op.get_attr("R_Rc"),
+        R_eta=op.get_attr("R_eta"),
+        A_Rc=op.get_attr("A_Rc"),
+        A_eta=op.get_attr("A_eta"),
+        A_zeta=op.get_attr("A_zeta"),
+        R_Rs=op.get_attr("R_Rs"),
+        A_thetas=op.get_attr("A_thetas"),
+        A_Rs=op.get_attr("A_Rs")
     )
 
+    # is this correct?
     return [
-        None, # x
+        None, # x 
         None, # y
         None, # z
         None, # a
@@ -87,7 +107,10 @@ def _feat_grad_grad(op, dLdx, dLdy, dLdz):
         None, # macs
         None, # sis
         None, # acs
-        dh, dc, dn, do
+        dh,
+        dc,
+        dn,
+        do
     ]
 
 #(ytz: TODO) Add second derivative of this op to allow for training both charge and gradients
@@ -179,6 +202,39 @@ def average_gradients(tower_grads):
     return average_grads
 
 
+class FeaturizationParameters():
+
+    def __init__(self,
+        n_types=4,
+        R_Rc=4.6,
+        R_eta=16.0,
+        A_Rc=3.1,
+        A_eta=6.0,
+        A_zeta=8.0,
+        R_Rs=(5.0000000e-01,7.5625000e-01,1.0125000e+00,1.2687500e+00,1.5250000e+00,1.7812500e+00,2.0375000e+00,2.2937500e+00,2.5500000e+00,2.8062500e+00,3.0625000e+00,3.3187500e+00,3.5750000e+00,3.8312500e+00,4.0875000e+00,4.3437500e+00),
+        A_thetas=(0.0000000e+00,7.8539816e-01,1.5707963e+00,2.3561945e+00,3.1415927e+00,3.9269908e+00,4.7123890e+00,5.4977871e+00),
+        A_Rs=(5.0000000e-01,1.1500000e+00,1.8000000e+00,2.4500000e+00)):
+
+        self.n_types = n_types
+        self.R_Rc = R_Rc
+        self.R_eta = R_eta
+        self.A_Rc = A_Rc
+        self.A_eta = A_eta
+        self.A_zeta = A_zeta
+        self.R_Rs = R_Rs
+        self.A_thetas = A_thetas
+        self.A_Rs = A_Rs
+
+    def radial_size(self):
+        return self.n_types * len(self.R_Rs)
+
+    def angular_size(self):
+        return len(self.A_Rs) * len(self.A_thetas) * (self.n_types * (self.n_types+1) // 2)
+
+    def total_feature_size(self):
+        return self.radial_size() + self.angular_size()
+
+
 class TrainerMultiTower():
 
     def __init__(self,
@@ -187,7 +243,8 @@ class TrainerMultiTower():
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
         activation_fn=activations.celu,
-        fit_charges=False):
+        fit_charges=False,
+        featurization_parameters=FeaturizationParameters()):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
@@ -214,7 +271,7 @@ class TrainerMultiTower():
         assert (precision is tf.float32) or (precision is tf.float64)
         assert self.num_towers > 0
         self.precision = precision
-
+        self.feat_params = featurization_parameters
         self.x_enq = tf.placeholder(dtype=precision)
         self.y_enq = tf.placeholder(dtype=precision)
         self.z_enq = tf.placeholder(dtype=precision)
@@ -316,9 +373,19 @@ class TrainerMultiTower():
                                     mol_atom_counts,
                                     scatter_idxs,
                                     atom_counts,
-                                    name="ani_op_"+str(tower_idx)
+                                    name="ani_op_"+str(tower_idx),
+                                    n_types=self.feat_params.n_types,
+                                    R_Rc=self.feat_params.R_Rc,
+                                    R_eta=self.feat_params.R_eta,
+                                    A_Rc=self.feat_params.A_Rc,
+                                    A_eta=self.feat_params.A_eta,
+                                    A_zeta=self.feat_params.A_zeta,
+                                    R_Rs=self.feat_params.R_Rs,
+                                    A_thetas=self.feat_params.A_thetas,
+                                    A_Rs=self.feat_params.A_Rs,
                                 )
-                                feat_size = f0.op.get_attr("feature_size")
+                                feat_size = self.feat_params.total_feature_size()
+                                # feat_size = f0.op.get_attr("feature_size")
 
                                 # TODO: optimize in C++ code directly to avoid reshape
                                 f0 = tf.reshape(f0, (-1, feat_size))
