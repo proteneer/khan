@@ -5,7 +5,7 @@ import tensorflow as tf
 import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
+from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module, FeaturizationParameters
 from khan.model import activations
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
@@ -83,6 +83,20 @@ def main():
         # activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
         # activation_fn = activations.get_fn_by_name("normal", 0.5, 0.2)
 
+
+        feat_params = FeaturizationParameters()
+        # overwrite with whatever you want
+        # feat_params = FeaturizationParameters(
+            # n_types=4,
+            # R_Rc=4.6,
+            # R_eta=16.0,
+            # A_Rc=3.1,
+            # A_eta=6.0,
+            # A_zeta=8.0,
+            # R_Rs=(5.0000000e-01,7.5625000e-01,1.0125000e+00,1.2687500e+00,1.5250000e+00,1.7812500e+00,2.0375000e+00,2.2937500e+00,2.5500000e+00,2.8062500e+00,3.0625000e+00,3.3187500e+00,3.5750000e+00,3.8312500e+00,4.0875000e+00,4.3437500e+00),
+            # A_thetas=(0.0000000e+00,7.8539816e-01,1.5707963e+00,2.3561945e+00,3.1415927e+00,3.9269908e+00,4.7123890e+00,5.4977871e+00),
+            # A_Rs=(5.0000000e-01,1.1500000e+00,1.8000000e+00,2.4500000e+00)
+        #)
 
         trainer = TrainerMultiTower(
             sess,
