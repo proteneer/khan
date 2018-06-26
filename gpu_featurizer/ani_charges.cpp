@@ -9,6 +9,7 @@
 // g++ -std=c++11 -shared fast_split_sort_gather.cpp -o ani_sort.so -fPIC ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -O3 -Ofast -march=native -ltensorflow_framework
 
 
+
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -18,8 +19,13 @@
 #include <algorithm>
 #include <numeric>
 
-#include "parameters.h"
+// #include "parameters.h"
 // #include "numeric_helpers.h"
+
+const float R_Rc = 4.6;
+
+const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, atoms, and atomic charges
+
 
 #include <cmath>
 

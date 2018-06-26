@@ -26,6 +26,12 @@
 
 using namespace tensorflow;
 
+const float R_Rc = 4.6;
+
+const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, atoms, and atomic charges
+
+
+
 // todo: refactor with functor_op_gpu.cu
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)

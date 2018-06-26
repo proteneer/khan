@@ -1,14 +1,6 @@
 #ifndef PARAMETERS_H_
 #define PARAMETERS_H_
 
-#ifdef GOOGLE_CUDA
-    #define CONSTANT_FLAGS __device__
-#else
-    #define CONSTANT_FLAGS
-#endif
-
-const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, atoms, and atomic charges
-
 /* Even-smaller featurization, ani_tiny_q.so */
 
 // const int MAX_ATOM_TYPES = 4;
@@ -26,7 +18,6 @@ const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, ato
 // const int NUM_A_RS = 4; // reduced from 4 to 3
 
 // const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MAX_ATOM_TYPES+1) / 2);
-
 // const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
 // CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
@@ -54,64 +45,92 @@ const float CHARGE_CONSTANT = 0.529176917; // Coulomb's constant in Hartree, ato
 // };
 
 
+// make these const, add constructor initialization list
+struct AniParams {
+    int max_types;
+    float R_Rc;
+    float R_eta;
+    float A_Rc;
+    float A_eta;
+    float A_zeta;
+    int Num_R_Rs;
+    int Num_A_Rs;
+    int Num_A_thetas;
+    const float *R_Rs;
+    const float *A_thetas;
+    const float *A_Rs;
+
+    size_t angular_size() const {
+        return Num_A_Rs * Num_A_thetas * (max_types * (max_types+1) / 2);
+    }
+
+    size_t radial_size() const {
+        return max_types * Num_R_Rs;
+    }
+
+    size_t total_feature_size() const {
+        return radial_size() + angular_size();
+    }
+
+};
 
 
 /* from github repo (ani_small) */
 
-const int MAX_ATOM_TYPES = 4;
+// const int MAX_ATOM_TYPES = 4;
 
-const int NUM_R_Rs = 16;
-const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
+// const int NUM_R_Rs = 16;
+// const int RADIAL_FEATURE_SIZE = MAX_ATOM_TYPES * NUM_R_Rs;
 
-const float R_eta = 16;
-const float R_Rc = 4.6;
+// const float R_eta = 16;
+// const float R_Rc = 4.6;
 
-const float A_Rc = 3.1;
-const float A_eta = 6.0;
-const float A_zeta = 8.0;
-const int NUM_A_THETAS = 8;
-const int NUM_A_RS = 4;
+// const float A_Rc = 3.1;
+// const float A_eta = 6.0;
+// const float A_zeta = 8.0;
+// const int NUM_A_THETAS = 8;
+// const int NUM_A_RS = 4;
 
-const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MAX_ATOM_TYPES+1) / 2);
+// const int ANGULAR_FEATURE_SIZE = NUM_A_RS * NUM_A_THETAS * (MAX_ATOM_TYPES * (MAX_ATOM_TYPES+1) / 2);
 
-const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
+// const int TOTAL_FEATURE_SIZE = RADIAL_FEATURE_SIZE + ANGULAR_FEATURE_SIZE;
 
-CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
-    5.0000000e-01,
-    7.5625000e-01,
-    1.0125000e+00,
-    1.2687500e+00,
-    1.5250000e+00,
-    1.7812500e+00,
-    2.0375000e+00,
-    2.2937500e+00,
-    2.5500000e+00,
-    2.8062500e+00,
-    3.0625000e+00,
-    3.3187500e+00,
-    3.5750000e+00,
-    3.8312500e+00,
-    4.0875000e+00,
-    4.3437500e+00
-};
+// CONSTANT_FLAGS const float R_Rs[NUM_R_Rs] = {
+//     5.0000000e-01,
+//     7.5625000e-01,
+//     1.0125000e+00,
+//     1.2687500e+00,
+//     1.5250000e+00,
+//     1.7812500e+00,
+//     2.0375000e+00,
+//     2.2937500e+00,
+//     2.5500000e+00,
+//     2.8062500e+00,
+//     3.0625000e+00,
+//     3.3187500e+00,
+//     3.5750000e+00,
+//     3.8312500e+00,
+//     4.0875000e+00,
+//     4.3437500e+00
+// };
 
-CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
-    0.0000000e+00,
-    7.8539816e-01,
-    1.5707963e+00,
-    2.3561945e+00,
-    3.1415927e+00,
-    3.9269908e+00,
-    4.7123890e+00,
-    5.4977871e+00
-};
+// CONSTANT_FLAGS const float A_thetas[NUM_A_THETAS] = {
+//     0.0000000e+00,
+//     7.8539816e-01,
+//     1.5707963e+00,
+//     2.3561945e+00,
+//     3.1415927e+00,
+//     3.9269908e+00,
+//     4.7123890e+00,
+//     5.4977871e+00
+// };
 
-CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
-    5.0000000e-01,
-    1.1500000e+00,
-    1.8000000e+00,
-    2.4500000e+00,
-};
+// CONSTANT_FLAGS const float A_Rs[NUM_A_RS] = {
+//     5.0000000e-01,
+//     1.1500000e+00,
+//     1.8000000e+00,
+//     2.4500000e+00,
+// };
 
 
 

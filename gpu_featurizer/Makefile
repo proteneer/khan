@@ -12,17 +12,17 @@ TF_LFLAGS=-L/home/yutong/venv/lib/python3.5/site-packages/tensorflow -ltensorflo
 
 NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -Xcompiler -fPIC -O3 -D GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
 CC=g++
-# CC_FLAGS=-std=c++11 -O2 -march=native -fPIC $(TF_CFLAGS)
 CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
+# CC_FLAGS=-std=c++11 -g -O2 -march=native -fPIC $(TF_CFLAGS)
 CC_LINK_FLAGS=$(TF_LFLAGS)
 
 all: ani
 
-ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op_gpu.o ani_sort.o ani_charges.o ani_charges_gpu.o
-	$(CC) -shared -o ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op_gpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+ani: functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_op_gpu.o ani_sort.o ani_charges.o ani_charges_gpu.o memcpy.o memcpy_gpu.o
+	$(CC) -shared -o ani.so functor_op_cpu.o functor_op_gpu.o kernel.o kernel_cpu.o ani_charges.o ani_charges_gpu.o ani_op_gpu.o ani_sort.o memcpy.o memcpy_gpu.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
-ani_cpu: functor_op_cpu.o kernel_cpu.o ani_op_cpu.o ani_sort.o ani_charges.o
-	$(CC) -shared -o ani_cpu.so functor_op_cpu.o kernel_cpu.o ani_charges.o ani_op_cpu.o ani_sort.o $(CC_FLAGS) $(CC_LINK_FLAGS)
+ani_cpu: functor_op_cpu.o kernel_cpu.o ani_op_cpu.o ani_sort.o ani_charges.o memcpy.o
+	$(CC) -shared -o ani_cpu.so functor_op_cpu.o kernel_cpu.o ani_charges.o ani_op_cpu.o ani_sort.o memcpy.o $(CC_FLAGS) $(CC_LINK_FLAGS)
 
 ani_charges_gpu.o: ani_charges_gpu.cu parameters.h
 	$(NVCC) ani_charges_gpu.cu -c $(NVCC_FLAGS)
@@ -50,6 +50,12 @@ ani_sort.o: ani_sort.cpp
 
 ani_charges.o: ani_charges.cpp parameters.h
 	$(CC) ani_charges.cpp -c $(CC_FLAGS)
+
+memcpy.o: memcpy.cpp memcpy.h
+	$(CC) memcpy.cpp -c $(CC_FLAGS)
+
+memcpy_gpu.o:  memcpy_gpu.cu memcpy.h
+	$(NVCC) memcpy_gpu.cu -c $(NVCC_FLAGS)
 
 clean:
 	rm -f *.o

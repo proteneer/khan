@@ -1,6 +1,8 @@
 #ifndef ANI_KERNEL_CUH_
 #define ANI_KERNEL_CUH_
 
+#include "parameters.h"
+
 __global__ void featurize(
     const float *Xs,
     const float *Ys,
@@ -16,7 +18,8 @@ __global__ void featurize(
     float *X_feat_out_H,
     float *X_feat_out_C,
     float *X_feat_out_N,
-    float *X_feat_out_O);
+    float *X_feat_out_O,
+    AniParams params);
 
 __global__ void initialize(
     float *array,
