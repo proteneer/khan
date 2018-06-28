@@ -86,11 +86,11 @@ def main():
             # fit_charges=True,
         )
 
-        # if os.path.exists(save_dir):
-            # print("Restoring existing model from", save_dir)
-            # trainer.load(save_dir)
-        # else:
-        trainer.initialize() # initialize to random variables
+        if os.path.exists(save_dir):
+            print("Restoring existing model from", save_dir)
+            trainer.load(save_dir)
+        else:
+            trainer.initialize() # initialize to random variables
 
         max_local_epoch_count = 10
 
