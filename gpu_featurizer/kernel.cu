@@ -15,7 +15,7 @@ This kernel implements the ANI-1 featurization scheme. It can process about 3.6 
 
 inline __device__ float dist_diff(float dx, float dy, float dz) {
 
-    return sqrt(dx*dx+dy*dy+dz*dz);
+    return sqrtf(dx*dx+dy*dy+dz*dz);
 
 }
 
@@ -69,7 +69,7 @@ __global__ void scatter(
 }
 
 // Remind yutong to document what these pointers are.
-__global__ void featurize(
+__global__ void featurize_gpu(
     const float *Xs,
     const float *Ys,
     const float *Zs,
@@ -179,23 +179,57 @@ __global__ void featurize(
             // radial features
             if(r_ij < params.R_Rc && local_atom_idx < j) {
                 for(int r_idx = 0; r_idx < params.Num_R_Rs; r_idx++) {
-                    float summand = expf(-params.R_eta * powf(r_ij - params.R_Rs[r_idx], 2.0)) * f_C(r_ij, params.R_Rc);
+                    float diff = r_ij - params.R_Rs[r_idx];
+                    float summand = expf(-params.R_eta * diff * diff) * f_C(r_ij, params.R_Rc);
+
+                    // // float inner = powf(r_ij - params.R_Rs[r_idx], 2);
+
+
+                    // // if(isnan(inner) || isinf(inner)) {
+                    // //     printf("SUMMAND INNER NAN\n");
+                    // // }
+
+
+
+                    // float diff = r_ij - params.R_Rs[r_idx];
+
+                    // float inner = diff*diff;
+
+
+                    // if(isnan(inner) || isinf(inner)) {
+                    //     printf("SUMMAND INNER NAN %f %f %f\n", r_ij,  params.R_Rs[r_idx], inner);
+                    // }
+
+                    // float a = expf(-params.R_eta * inner);
+                    // float b = f_C(r_ij, params.R_Rc);
+
+                    // if(isnan(a) || isinf(a)) {
+                    //     printf("SUMMAND A NAN\n");
+                    // }
+
+                    // if(isnan(b) || isinf(b)) {
+                    //     printf("SUMMAND B NAN\n");
+                    // }
+
+
+                    // float summand = a*b;
+
 
                     // exploit symmetry of the atomic adds
                     auto res1 = atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx, summand);
                     auto res2 = atomicAdd(radial_feature_buffer_j + atomic_nums[g_atom_idx_i] * params.Num_R_Rs + r_idx, summand);
 
-                    //if(isnan(res1) || isinf(res1)) {
-                    //    printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
+                    // if(isnan(res1) || isinf(res1)) {
+                       // printf("WTF RADIAL RES1 NAN/INF, offset, %f, %f\n", res1, summand);
                         // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
                             // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                    //}
+                    // }
 
-                    //if(isnan(res2) || isinf(res2)) {
-                    //    printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
+                    // if(isnan(res2) || isinf(res2)) {
+                       // printf("WTF RADIAL RES2 NAN/INF, offset, %f, %f\n", res2, summand);
                         // : %d, %d, %d, r_ij, r_ik, %f, %f, top %f, bottom %f, i_coords:(%f, %f, %f), j_coords(%f, %f, %f), k_coords(%f, %f, %f)\n",
                             // g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, r_ij, r_ik, d_ij_x*d_ik_x + d_ij_y*d_ik_y + d_ij_z*d_ik_z, r_ij * r_ik, i_x, i_y, i_z, j_x, j_y, j_z, k_x, k_y, k_z);
-                    //}
+                    // }
 
                 }
             }
@@ -249,7 +283,8 @@ __global__ void featurize(
                         for(int t=0; t < params.Num_A_thetas; t++) {
                             for(int s=0; s < params.Num_A_Rs; s++) {
                                 // (TODO: ytz) do 2*(1-A_Zeta) at the end
-                                float summand = powf(2, 1-params.A_zeta) * powf(1+cosf(theta_ijk - params.A_thetas[t]), params.A_zeta) * expf(-params.A_eta*powf((r_ij + r_ik)/2 - params.A_Rs[s], 2)) * A_f_C_ij * A_f_C_ik;
+                                float inner = (r_ij + r_ik)/2 - params.A_Rs[s]; // powf(x,y) is numerically unstable for negative xs so we simply double them.
+                                float summand = powf(2, 1-params.A_zeta) * powf(1+cosf(theta_ijk - params.A_thetas[t]), params.A_zeta) * expf(-params.A_eta*inner*inner) * A_f_C_ij * A_f_C_ik;
                                 // printf("summand: %f, \n", summand);
                                 // printf("scatter_idxs[g_atom_idx_i]: %d, linearize: %d\n", scatter_idxs[g_atom_idx_i], linearize(an_j, an_k, t, s));
                                 // printf("i,j,k,t,s %d %d %d %d %d %d\n", g_atom_idx_i, g_atom_idx_j, g_atom_idx_k, at_idx, ar_idx, linearize(j_type, k_type, at_idx, ar_idx))
@@ -268,6 +303,354 @@ __global__ void featurize(
     } // end all warps
 
 }
+
+// template<typename X_type, typename Y_type>
+__device__ static inline float square(float x) {
+    return x*x;
+}
+
+// Remind yutong to document what these pointers are.
+__global__ void featurize_grad_gpu(
+    const float *Xs,
+    const float *Ys,
+    const float *Zs,
+
+    const int *atomic_nums,
+    const int *mol_offsets,
+    const int *mol_atom_count,
+    const int num_mols, // actually equal to blockDim.x
+
+    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+
+    const float *H_grads,
+    const float *C_grads,
+    const float *N_grads,
+    const float *O_grads,
+
+    float *X_grads,
+    float *Y_grads,
+    float *Z_grads,
+
+    AniParams params) {
+
+    int mol_idx = blockIdx.x;
+    int num_atoms = mol_atom_count[blockIdx.x];
+    int block_size = blockDim.x;
+    int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
+
+    const size_t angular_feature_size = params.Num_A_Rs * params.Num_A_thetas * (params.max_types * (params.max_types+1) / 2);
+    const size_t radial_feature_size = params.max_types * params.Num_R_Rs;
+    const size_t total_feature_size = angular_feature_size + radial_feature_size;
+
+    for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
+
+        int local_atom_idx = warp_idx*block_size + threadIdx.x; // local_local_atom_idx
+
+        if (local_atom_idx >= num_atoms) {
+            return;
+        }
+
+        // todo: cache into shared mem
+        // load all the x y z coordinates
+        int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
+        int g_atomic_num_i = atomic_nums[g_atom_idx_i];
+
+        float i_x = Xs[g_atom_idx_i];
+        float i_y = Ys[g_atom_idx_i];
+        float i_z = Zs[g_atom_idx_i];
+
+        const float *output_buffer_i;
+        if(g_atomic_num_i == 0) {
+            output_buffer_i = H_grads;
+        } else if(g_atomic_num_i == 1) {
+            output_buffer_i = C_grads;
+        } else if(g_atomic_num_i == 2) {
+            output_buffer_i = N_grads;
+        } else {
+            output_buffer_i = O_grads;
+        }
+      
+        const float *radial_feature_buffer_i = output_buffer_i + scatter_idxs[g_atom_idx_i]*total_feature_size + 0;
+        const float *angular_feature_buffer_i = output_buffer_i + scatter_idxs[g_atom_idx_i]*total_feature_size + radial_feature_size;
+
+        for(int j=0; j < num_atoms; j++) {
+
+            int g_atom_idx_j = mol_offsets[mol_idx]+j;
+            // int g_atomic_num_j = atomic_nums[g_atom_idx_j];
+
+            float j_x = Xs[g_atom_idx_j];
+            float j_y = Ys[g_atom_idx_j];
+            float j_z = Zs[g_atom_idx_j];
+
+            float d_ij_x = i_x - j_x;
+            float d_ij_y = i_y - j_y;
+            float d_ij_z = i_z - j_z;
+
+            // printf("(%f, %f, %f)\n", d_ij_x, d_ij_y, d_ij_z);
+
+            float r_ij = dist_diff(d_ij_x, d_ij_y, d_ij_z);
+
+            // radial features
+            if(r_ij < params.R_Rc && local_atom_idx != j) {
+                for(int r_idx = 0; r_idx < params.Num_R_Rs; r_idx++) {
+
+                    float d_y_i = radial_feature_buffer_i[atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx]; // gradient broadcast
+
+                    // todo: convert cos to cosf
+
+                    float accum_i_x = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_x - j_x)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(i_x - j_x)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                    float accum_i_y = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_y - j_y)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(i_y - j_y)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                    float accum_i_z = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_z - j_z)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(i_z - j_z)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+
+                    // accumulate locally
+                    atomicAdd(X_grads+g_atom_idx_i, accum_i_x * d_y_i);
+                    atomicAdd(Y_grads+g_atom_idx_i, accum_i_y * d_y_i);
+                    atomicAdd(Z_grads+g_atom_idx_i, accum_i_z * d_y_i);
+
+                    float accum_j_x = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_x + j_x)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(-i_x + j_x)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                    float accum_j_y = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_y + j_y)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(-i_y + j_y)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                    float accum_j_z = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_z + j_z)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))/r_ij - 0.5*M_PI*(-i_z + j_z)*expf(-params.R_eta*square(-params.R_Rs[r_idx] + r_ij))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+
+                    atomicAdd(X_grads+g_atom_idx_j, accum_j_x * d_y_i);
+                    atomicAdd(Y_grads+g_atom_idx_j, accum_j_y * d_y_i);
+                    atomicAdd(Z_grads+g_atom_idx_j, accum_j_z * d_y_i);
+
+                }
+            }
+
+            float A_f_C_ij = f_C(r_ij, params.A_Rc);
+
+
+            if(r_ij < params.A_Rc) {
+                for(size_t k=j+1; k < num_atoms; k++) {
+                    if(local_atom_idx == j || local_atom_idx == k || j == k) {
+                        continue;
+                    }
+
+                    int g_atom_idx_k = mol_offsets[mol_idx]+k;
+
+                    const int an_j = atomic_nums[g_atom_idx_j];
+                    const int an_k = atomic_nums[g_atom_idx_k];
+
+                    float k_x = Xs[g_atom_idx_k];
+                    float k_y = Ys[g_atom_idx_k];
+                    float k_z = Zs[g_atom_idx_k];
+
+                    float d_ik_x = i_x - k_x;
+                    float d_ik_y = i_y - k_y;
+                    float d_ik_z = i_z - k_z;
+
+                    float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
+
+                    if(r_ik < params.A_Rc) {
+                        for(int t=0; t < params.Num_A_thetas; t++) {
+                            for(int s=0; s < params.Num_A_Rs; s++) {
+
+                                float d_y_i = angular_feature_buffer_i[linearize(an_j, an_k, t, s, params)];   
+
+                                float l2ij = square(i_x - j_x) + square(i_y - j_y) + square(i_z - j_z);
+                                float l2ik = square(i_x - k_x) + square(i_y - k_y) + square(i_z - k_z);
+                                float dij = sqrtf(l2ij);
+                                float dik = sqrtf(l2ik);
+                                float ijk_swizzle = (i_x - j_x)*(i_x - k_x) + (i_y - j_y)*(i_y - k_y) + (i_z - j_z)*(i_z - k_z);
+
+                                float pfarsdijk2 = expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2));
+
+                                // accumulate locally
+                                float accum_i_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_x - j_x)/dij + (i_x - k_x)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2 - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_x + j_x)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik) + (-i_x + k_x)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)) + (2*i_x - j_x - k_x)/(dij*dik))*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_x - j_x)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_x - k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                float accum_i_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_y - j_y)/dij + (i_y - k_y)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2 - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_y + j_y)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik) + (-i_y + k_y)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)) + (2*i_y - j_y - k_y)/(dij*dik))*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_y - j_y)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_y - k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                float accum_i_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_z - j_z)/dij + (i_z - k_z)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2 - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_z + j_z)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik) + (-i_z + k_z)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)) + (2*i_z - j_z - k_z)/(dij*dik))*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_z - j_z)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_z - k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+
+                                // these are accumulated
+                                atomicAdd(X_grads+g_atom_idx_i, accum_i_x * d_y_i);
+                                atomicAdd(Y_grads+g_atom_idx_i, accum_i_y * d_y_i);
+                                atomicAdd(Z_grads+g_atom_idx_i, accum_i_z * d_y_i);
+
+                                float accum_j_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_x + j_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_x + k_x)/(dij*dik) + (i_x - j_x)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_x + j_x)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij);
+                                float accum_j_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_y + j_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_y + k_y)/(dij*dik) + (i_y - j_y)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_y + j_y)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij);
+                                float accum_j_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_z + j_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_z + k_z)/(dij*dik) + (i_z - j_z)*(ijk_swizzle)/(powf(l2ij, 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_z + j_z)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij); 
+
+                                atomicAdd(X_grads+g_atom_idx_j, accum_j_x * d_y_i);
+                                atomicAdd(Y_grads+g_atom_idx_j, accum_j_y * d_y_i);
+                                atomicAdd(Z_grads+g_atom_idx_j, accum_j_z * d_y_i);
+
+                                float accum_k_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_x + k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_x + j_x)/(dij*dik) + (i_x - k_x)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_x + k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                float accum_k_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_y + k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_y + j_y)/(dij*dik) + (i_y - k_y)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_y + k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                float accum_k_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_z + k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*pfarsdijk2/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_z + j_z)/(dij*dik) + (i_z - k_z)*(ijk_swizzle)/(dij*powf(l2ik, 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((l2ij)*(l2ik)) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_z + k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*pfarsdijk2*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+
+                                atomicAdd(X_grads+g_atom_idx_k, accum_k_x * d_y_i);
+                                atomicAdd(Y_grads+g_atom_idx_k, accum_k_y * d_y_i);
+                                atomicAdd(Z_grads+g_atom_idx_k, accum_k_z * d_y_i);
+                            }
+                        }
+                    }
+                }
+            } // end radial
+        } // end current warp
+    } // end all warps
+
+}
+
+// Remind yutong to document what these pointers are.
+__global__ void featurize_grad_inverse_gpu(
+    const float *Xs,
+    const float *Ys,
+    const float *Zs,
+
+    const int *atomic_nums,
+    const int *mol_offsets,
+    const int *mol_atom_count,
+    const int num_mols, // actually equal to blockDim.x
+
+    const int *scatter_idxs, // LOCAL WITHIN THE ATOM TYPE
+    const float *X_grads,
+    const float *Y_grads,
+    const float *Z_grads,
+
+    float *H_grads,
+    float *C_grads,
+    float *N_grads,
+    float *O_grads,
+
+    AniParams params) {
+
+    int mol_idx = blockIdx.x;
+    int num_atoms = mol_atom_count[blockIdx.x];
+    int block_size = blockDim.x;
+    int num_warps = (num_atoms + block_size - 1)/block_size; // how many warps we need to process
+
+    const size_t angular_feature_size = params.Num_A_Rs * params.Num_A_thetas * (params.max_types * (params.max_types+1) / 2);
+    const size_t radial_feature_size = params.max_types * params.Num_R_Rs;
+    const size_t total_feature_size = angular_feature_size + radial_feature_size;
+
+    for(int warp_idx = 0; warp_idx < num_warps; warp_idx++) {
+
+        int local_atom_idx = warp_idx*block_size + threadIdx.x; // local_local_atom_idx
+
+        if (local_atom_idx >= num_atoms) {
+            return;
+        }
+
+        // todo: cache into shared mem
+        // load all the x y z coordinates
+        int g_atom_idx_i = mol_offsets[mol_idx]+local_atom_idx;
+        int g_atomic_num_i = atomic_nums[g_atom_idx_i];
+
+        float i_x = Xs[g_atom_idx_i];
+        float i_y = Ys[g_atom_idx_i];
+        float i_z = Zs[g_atom_idx_i];
+
+        float *output_buffer_i;
+        if(g_atomic_num_i == 0) {
+            output_buffer_i = H_grads;
+        } else if(g_atomic_num_i == 1) {
+            output_buffer_i = C_grads;
+        } else if(g_atomic_num_i == 2) {
+            output_buffer_i = N_grads;
+        } else {
+            output_buffer_i = O_grads;
+        }
+      
+        float *radial_feature_buffer_i = output_buffer_i + scatter_idxs[g_atom_idx_i]*total_feature_size + 0;
+        float *angular_feature_buffer_i = output_buffer_i + scatter_idxs[g_atom_idx_i]*total_feature_size + radial_feature_size;
+
+        for(int j=0; j < num_atoms; j++) {
+
+            int g_atom_idx_j = mol_offsets[mol_idx]+j;
+            // int g_atomic_num_j = atomic_nums[g_atom_idx_j];
+
+            float j_x = Xs[g_atom_idx_j];
+            float j_y = Ys[g_atom_idx_j];
+            float j_z = Zs[g_atom_idx_j];
+
+            float d_ij_x = i_x - j_x;
+            float d_ij_y = i_y - j_y;
+            float d_ij_z = i_z - j_z;
+
+            // printf("(%f, %f, %f)\n", d_ij_x, d_ij_y, d_ij_z);
+
+            float r_ij = dist_diff(d_ij_x, d_ij_y, d_ij_z);
+
+            // radial features
+            if(r_ij < params.R_Rc && local_atom_idx != j) {
+                for(int r_idx = 0; r_idx < params.Num_R_Rs; r_idx++) {
+                        float accum_i_x = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_x - j_x)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_x - j_x)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                        float accum_i_y = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_y - j_y)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_y - j_y)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                        float accum_i_z = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(i_z - j_z)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(i_z - j_z)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+
+                        float accumulant = accum_i_x * X_grads[g_atomic_num_i] + accum_i_y * Y_grads[g_atomic_num_i] + accum_i_z * Z_grads[g_atomic_num_i];
+                        radial_feature_buffer_i[atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx] += accumulant;
+
+                        float accum_j_x = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_x + j_x)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(-i_x + j_x)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                        float accum_j_y = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_y + j_y)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(-i_y + j_y)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+                        float accum_j_z = -2*params.R_eta*(-params.R_Rs[r_idx] + r_ij)*(-i_z + j_z)*(0.5*cosf(M_PI*r_ij/params.R_Rc) + 0.5)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))/r_ij - 0.5*M_PI*(-i_z + j_z)*expf(-params.R_eta*powf(-params.R_Rs[r_idx] + r_ij, 2))*sinf(M_PI*r_ij/params.R_Rc)/(params.R_Rc*r_ij);
+
+                        accumulant = accum_j_x * X_grads[g_atomic_num_i] + accum_j_y * Y_grads[g_atomic_num_i] + accum_j_z * Z_grads[g_atomic_num_i];
+                        atomicAdd(radial_feature_buffer_i + atomic_nums[g_atom_idx_j] * params.Num_R_Rs + r_idx, accumulant);
+                }
+            }
+
+            float A_f_C_ij = f_C(r_ij, params.A_Rc);
+
+
+            if(r_ij < params.A_Rc) {
+                for(size_t k=j+1; k < num_atoms; k++) {
+                    if(local_atom_idx == j || local_atom_idx == k || j == k) {
+                        continue;
+                    }
+
+                    int g_atom_idx_k = mol_offsets[mol_idx]+k;
+
+                    const int an_j = atomic_nums[g_atom_idx_j];
+                    const int an_k = atomic_nums[g_atom_idx_k];
+
+                    float k_x = Xs[g_atom_idx_k];
+                    float k_y = Ys[g_atom_idx_k];
+                    float k_z = Zs[g_atom_idx_k];
+
+                    float d_ik_x = i_x - k_x;
+                    float d_ik_y = i_y - k_y;
+                    float d_ik_z = i_z - k_z;
+
+                    float r_ik = dist_diff(d_ik_x, d_ik_y, d_ik_z);
+
+                    if(r_ik < params.A_Rc) {
+                        for(int t=0; t < params.Num_A_thetas; t++) {
+                            for(int s=0; s < params.Num_A_Rs; s++) {
+                                    float dij = sqrtf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2));
+                                    float dik = sqrtf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2));
+                                    float ijk_swizzle = (i_x - j_x)*(i_x - k_x) + (i_y - j_y)*(i_y - k_y) + (i_z - j_z)*(i_z - k_z);
+
+                                    float accum_i_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_x - j_x)/dij + (i_x - k_x)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2)) - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_x + j_x)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik) + (-i_x + k_x)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)) + (2*i_x - j_x - k_x)/(dij*dik))*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_x - j_x)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_x - k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                    float accum_i_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_y - j_y)/dij + (i_y - k_y)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2)) - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_y + j_y)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik) + (-i_y + k_y)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)) + (2*i_y - j_y - k_y)/(dij*dik))*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_y - j_y)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_y - k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                    float accum_i_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*((i_z - j_z)/dij + (i_z - k_z)/dik)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2)) - powf(2.0, -params.A_zeta + 1)*params.A_zeta*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*((-i_z + j_z)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik) + (-i_z + k_z)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)) + (2*i_z - j_z - k_z)/(dij*dik))*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_z - j_z)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(i_z - k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+
+                                    float accumulant = accum_i_x * X_grads[g_atomic_num_i] + accum_i_y * Y_grads[g_atomic_num_i] + accum_i_z * Z_grads[g_atomic_num_i];
+                                    atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s, params), accumulant);
+
+                                    float accum_j_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_x + j_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_x + k_x)/(dij*dik) + (i_x - j_x)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_x + j_x)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij);
+                                    float accum_j_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_y + j_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_y + k_y)/(dij*dik) + (i_y - j_y)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_y + j_y)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij);
+                                    float accum_j_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_z + j_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dij - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_z + k_z)/(dij*dik) + (i_z - j_z)*(ijk_swizzle)/(powf(powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2), 1.5)*dik))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_z + j_z)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dij/params.A_Rc)/(params.A_Rc*dij); 
+
+                                    accumulant = accum_j_x * X_grads[g_atomic_num_i] + accum_j_y * Y_grads[g_atomic_num_i] + accum_j_z * Z_grads[g_atomic_num_i];
+                                    atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s, params), accumulant);
+
+                                    float accum_k_x = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_x + k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_x + j_x)/(dij*dik) + (i_x - k_x)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_x + k_x)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+                                    float accum_k_y = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_y + k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_y + j_y)/(dij*dik) + (i_y - k_y)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_y + k_y)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);                                    
+                                    float accum_k_z = -powf(2.0, -params.A_zeta + 1)*params.A_eta*(-i_z + k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))/dik - powf(2.0, -params.A_zeta + 1)*params.A_zeta*((-i_z + j_z)/(dij*dik) + (i_z - k_z)*(ijk_swizzle)/(dij*powf(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2), 1.5)))*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*(0.5*cosf(M_PI*dik/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik)))/(sqrtf(-powf(ijk_swizzle, 2)/((powf(i_x - j_x, 2) + powf(i_y - j_y, 2) + powf(i_z - j_z, 2))*(powf(i_x - k_x, 2) + powf(i_y - k_y, 2) + powf(i_z - k_z, 2))) + 1)*(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1)) - 0.5*powf(2.0, -params.A_zeta + 1)*M_PI*(-i_z + k_z)*(0.5*cosf(M_PI*dij/params.A_Rc) + 0.5)*powf(cosf(params.A_thetas[t] - acosf((ijk_swizzle)/(dij*dik))) + 1, params.A_zeta)*expf(-params.A_eta*powf(-params.A_Rs[s] + (0.5)*dij + (0.5)*dik, 2))*sinf(M_PI*dik/params.A_Rc)/(params.A_Rc*dik);
+
+                                    accumulant = accum_k_x * X_grads[g_atomic_num_i] + accum_k_y * Y_grads[g_atomic_num_i] + accum_k_z * Z_grads[g_atomic_num_i];
+                                    atomicAdd(angular_feature_buffer_i + linearize(an_j, an_k, t, s, params), accumulant);
+                            }
+                        }
+                    }
+                }
+            } // end radial
+        } // end current warp
+    } // end all warps
+
+}
+
 
 
 template<typename T>

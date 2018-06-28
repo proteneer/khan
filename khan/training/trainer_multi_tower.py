@@ -506,7 +506,6 @@ class TrainerMultiTower():
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
 
-
     def initialize(self):
         """
         Randomly initialize the parameters in the trainer's underlying model.

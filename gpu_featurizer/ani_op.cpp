@@ -443,6 +443,8 @@ REGISTER_OP("FeaturizeGradInverse")
 
 #ifdef ANI_GPU
   REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_GPU).TypeConstraint<float>("FT"), AniCombined<GPUDevice, float>);
+  REGISTER_KERNEL_BUILDER(Name("FeaturizeGrad").HostMemory("acs").Device(DEVICE_GPU).TypeConstraint<float>("FT"), AniCombinedGrad<GPUDevice, float>);
+  REGISTER_KERNEL_BUILDER(Name("FeaturizeGradInverse").HostMemory("acs").Device(DEVICE_GPU).TypeConstraint<float>("FT"), AniCombinedGradInverse<GPUDevice, float>);
   // REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_GPU).TypeConstraint<double>("FT"), AniCombined<GPUDevice, double>);
 #endif
 REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_CPU).TypeConstraint<double>("FT"), AniCombined<CPUDevice, double>);
