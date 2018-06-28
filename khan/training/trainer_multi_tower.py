@@ -506,6 +506,47 @@ class TrainerMultiTower():
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
 
+    def serialize(self, export_path):
+        """
+        Serialize a tensorflow model.
+
+        Parameters
+        ----------
+        export_path: str
+            Location of the export path where we should save our models.
+
+        """
+
+        tensor_info_x = tf.saved_model.utils.build_tensor_info(self.x_enq)
+        tensor_info_y = tf.saved_model.utils.build_tensor_info(self.y_enq)
+        tensor_info_z = tf.saved_model.utils.build_tensor_info(self.z_enq)
+        tensor_info_a = tf.saved_model.utils.build_tensor_info(self.a_enq)
+        tensor_info_m = tf.saved_model.utils.build_tensor_info(self.m_enq)
+
+        tensor_info_y = tf.saved_model.utils.build_tensor_info(y)
+
+        prediction_signature = (
+            tf.saved_model.signature_def_utils.build_signature_def(
+                inputs={'b_x': tensor_info_x},
+                outputs={'batched_ys': tensor_info_y},
+                method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME
+            )
+        )
+
+        legacy_init_op = tf.group(tf.tables_initializer(), name='legacy_init_op')
+        builder = tf.saved_model.builder.SavedModelBuilder(export_path)
+        builder.add_meta_graph_and_variables(
+            self.sess, [tf.saved_model.tag_constants.SERVING],
+            # signature_def_map={
+                # 'predict_images':
+                # prediction_signature,
+                # signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY:
+                    # classification_signature,
+            # },
+            legacy_init_op=legacy_init_op)
+        builder.save()
+
+
 
     def initialize(self):
         """

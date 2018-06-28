@@ -125,19 +125,21 @@ def main():
                         before_hooks=trainer.max_norm_ops))
                     print(train_results_forces, end=" | ")
 
+                print(time.time()-start_time)
+
                 #train to energies
-                train_results_energies = list(trainer.feed_dataset(
-                    rd_train,
-                    shuffle=True,
-                    target_ops=train_ops,
-                    batch_size=batch_size,
-                    before_hooks=trainer.max_norm_ops))
+                # train_results_energies = list(trainer.feed_dataset(
+                #     rd_train,
+                #     shuffle=True,
+                #     target_ops=train_ops,
+                #     batch_size=batch_size,
+                #     before_hooks=trainer.max_norm_ops))
 
-                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-                gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                # train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                # test_abs_rmse = trainer.eval_abs_rmse(rd_test)
+                # gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
 
-                print(time.time()-start_time, train_abs_rmse, test_abs_rmse, gdb11_abs_rmse)
+                # print(time.time()-start_time, train_abs_rmse, test_abs_rmse, gdb11_abs_rmse)
 
 
             print("==========Decreasing learning rate==========")
