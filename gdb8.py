@@ -107,14 +107,6 @@ def main():
             fit_charges=False,
         )
 
-        import shutil
-        trainer.initialize()
-        save_model = "/home/yutong/Code/khan/model_save/test"
-        shutil.rmtree(save_model)
-        trainer.serialize(save_model)
-
-        assert 0
-
         if os.path.exists(save_file):
             print("Restoring existing model from", save_file)
             trainer.load_numpy(save_file)
