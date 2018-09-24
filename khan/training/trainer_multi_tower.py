@@ -242,7 +242,7 @@ class TrainerMultiTower():
         towers,
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
-        activation_fn=activations.celu,
+        activation_fn=activations.waterslide,
         fit_charges=False,
         featurization_parameters=FeaturizationParameters()):
         """
@@ -318,8 +318,8 @@ class TrainerMultiTower():
             self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
-                    beta2=0.999,
-                    epsilon=1e-8) # default is 1e-8
+                    beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
+                    epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
 
             self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
             self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
@@ -486,7 +486,14 @@ class TrainerMultiTower():
                             self.tower_force_grads.append(tower_force_grad)
 
             def tower_grads(grads):
-                apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
+                use_trust_radius = False
+                if not use_trust_radius:
+                    apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
+                else:
+                    grads, vs = zip(*average_gradients(grads))
+                    trust_radius = 1e-4
+                    grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
+                    apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
                 variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
                 variables_averages_op = variable_averages.apply(tf.trainable_variables())
                 return tf.group(apply_gradient_op, variables_averages_op)
@@ -894,7 +901,7 @@ class TrainerMultiTower():
     # run the actual training
     # (ytz) - this is maintained by jminuse for the sake of convenience for now.
     # This is HOTMERGED - I'd avoid calling this code if possible, it seriously needs refactoring
-    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, max_global_epoch_count=1000):
+    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, min_learning_rate=1e-7, max_global_epoch_count=2000):
 
         train_ops = [
             self.global_epoch_count,
@@ -906,7 +913,14 @@ class TrainerMultiTower():
         start_time = time.time()
         best_test_score = self.eval_abs_rmse(rd_test)
         global_epoch = 0
-        while batch_size < max_batch_size and global_epoch <= max_global_epoch_count: # bigger batches as fitting goes on, makes updates less exploratory
+        train_rmses = []
+        test_rmses = []
+        old_weights = {}
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
+        # Start fitting. Use smaller learning rate and
+        # bigger batches as fitting goes on, to make updates less exploratory
+        while batch_size < max_batch_size and self.sess.run(self.learning_rate)>=min_learning_rate and global_epoch <= max_global_epoch_count:
             while self.sess.run(self.local_epoch_count) < max_local_epoch_count and global_epoch <= max_global_epoch_count:
                 for step in range(2): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
                     train_step_time = time.time()
@@ -915,11 +929,25 @@ class TrainerMultiTower():
                         shuffle=True,
                         target_ops=train_ops,
                         batch_size=batch_size,
-                        before_hooks=self.max_norm_ops) )
+                        before_hooks=self.max_norm_ops),
+                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
+
+                for W in self._weight_matrices():
+                    w_matrix = self.sess.run(W)
+                    if W.name in old_weights:
+                        dw = np.sum( (w_matrix - old_weights[W.name])**2 / w_matrix.size )**0.5 # rmse between old weights and new
+                        dw /= learning_rate # divide by learning rate
+                        dw /= rd_train.num_batches(batch_size) # divide by number of gradient steps taken to get average rms change per step
+                        if '_l1:0' in W.name: # first layer, print name
+                            print(W.name, end=' ')
+                        print('%.2g' % dw, end=' ')
+                    old_weights[W.name] = w_matrix
+                print('')
+
                 local_epoch_count = train_results[0][2]
                 test_abs_rmse_time = time.time()
                 test_abs_rmse = self.eval_abs_rmse(rd_test)
@@ -928,6 +956,27 @@ class TrainerMultiTower():
                 start_time = time.time()
                 print(save_dir, end=' ')
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), 'batch_size', batch_size, '| train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+
+                train_rmses.append( train_abs_rmse )
+                test_rmses.append( test_abs_rmse )
+                # dynamic learning rate - let lr find its own best value based on trend of train rmse
+                # shouldn't look at test or especially validation error, that would be cheating and lead to overfitting
+                if global_epoch>=3 and global_epoch<=50:
+                    # if train error is dropping TOO smoothly, lr is probably too low
+                    train_rmse_changes = [ train_rmses[-ii-1]-train_rmses[-ii-2] for ii in range(3)]
+                    if all( [t<0.0 for t in train_rmse_changes] ): # train rmse has dropped for last N epochs
+                        self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 1.5)) )
+                if global_epoch >= 1:
+                    # reduce lr right away if training error rises fast - indicates numerical instability
+                    train_rmse_ratio = train_rmses[-1]/train_rmses[-2]
+                    if train_rmse_ratio > 1.5: # train rmse has risen by more than 50% in one step
+                        self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.75)) )
+                # the strongest evidence of numerical instability: NaN values
+                if np.isnan(train_abs_rmse):
+                    self.load_numpy(save_dir+'/best.npz')
+                    self.sess.run(tf.assign(self.global_epoch_count, global_epoch)) # because this gets wiped out during numpy load
+                    self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.75)) )
+                # Save model if it has the best validation set score
 
                 if test_abs_rmse < best_test_score:
                     self.save_best_params()
@@ -947,8 +996,9 @@ class TrainerMultiTower():
                 
             print("========== Decreasing learning rate, increasing batch size ==========")
             self.load_best_params()
+            self.load_numpy(save_dir+'/best.npz')
             self.sess.run(self.decr_learning_rate)
             self.sess.run(self.reset_local_epoch_count)
-            batch_size = int(batch_size*1.2)
-            max_local_epoch_count = int(max_local_epoch_count*1.2) # increase this since higher batch size means fewer actual gradient steps per epoch
+            batch_size += 16
+            self.sess.run(tf.assign(self.global_epoch_count, global_epoch)) # because this gets wiped out during numpy load
 

@@ -161,5 +161,6 @@ def test_opt():
             for i, atom, analytical_grad, numerical_grad in zip(range(len(st.atom)), st.atom, analytical_grads, numerical_grads):
                 print(i+1, atom.element, analytical_grad, numerical_grad)
 
+
 test_opt()
 
