@@ -17,6 +17,84 @@ def load_calibration_file(calibration_file):
 
         return mapping
 
+mapping = {
+    "H": 0,
+    "C": 1,
+    "N": 2,
+    "O": 3
+}
+
+HARTREE_TO_KCAL_PER_MOL = 627.509
+BOHR_TO_ANGSTROM = 0.529177249
+
+selfIxnNrgFitted = np.array([
+    -374.85 / HARTREE_TO_KCAL_PER_MOL, 
+    -23898.1 / HARTREE_TO_KCAL_PER_MOL, 
+    -34337.6 / HARTREE_TO_KCAL_PER_MOL, 
+    -47188.0 / HARTREE_TO_KCAL_PER_MOL 
+], dtype=np.float32)
+
+
+selfIxnNrgWB97X = np.array([
+    -0.499321232710,
+    -37.8338334397,
+    -54.5732824628,
+    -75.0424519384], dtype=np.float32)
+
+def extract_file(fname):
+
+    with open(fname, "r") as f:
+        force_lines = []
+        geom_lines = []
+        energy = None
+        append_buffer = None
+        energy = None
+
+        for l in f.readlines():
+            if append_buffer is not None:
+                append_buffer.append(l)
+            if "Total energy:" in l:
+                energy = np.float64(l.split()[2])
+            if "start of program der1b" in l:
+                append_buffer = force_lines
+            if "end of program der1b" in l:
+                append_buffer = None
+            if " Input geometry:" in l:
+                append_buffer = geom_lines
+            if " principal moments of inertia:" in l:
+                append_buffer = None
+
+        np_forces = []
+        for f in force_lines[6:-6]:
+            tmp = f.split()
+            np_forces.append([np.float64(tmp[2]), np.float64(tmp[3]), np.float64(tmp[4])])
+
+        np_geoms = []
+        for g in geom_lines[2:-2]:
+            tmp = g.split()
+            np_geoms.append([
+                            np.float64(mapping[tmp[0][0]]),
+                            np.float64(tmp[1])*BOHR_TO_ANGSTROM,
+                            np.float64(tmp[2])*BOHR_TO_ANGSTROM,
+                            np.float64(tmp[3])*BOHR_TO_ANGSTROM
+                            ])
+
+        np_forces = np.array(np_forces) / BOHR_TO_ANGSTROM
+        np_geoms = np.array(np_geoms)
+
+        atom_types = np_geoms[:, 0]
+
+
+        offset = 0
+        for a in atom_types:
+            offset += selfIxnNrgFitted[int(a)]
+
+        energy -= offset
+
+        assert np_forces.shape[0] == np_geoms.shape[0]
+
+        return np_geoms, energy, np_forces
+
 class DataLoader():
 
     def __init__(self, use_fitted, batch_size=1024):
@@ -63,6 +141,26 @@ class DataLoader():
 
         return Xs, ys
 
+    def load_gdb3_forces(self, data_dir):
+        Xs = []
+        ys = []
+        Fs = []
+        for f in os.listdir(data_dir):
+            if os.path.splitext(f)[-1] == '.out':
+                abspath = os.path.join(data_dir, f)
+                x, e, f = extract_file(abspath)
+
+                wb97offset = 0
+                Z = x[:, 0].astype(np.int32)
+                for z in Z:
+                    wb97offset += selfIxnNrgWB97X[z]
+
+                Xs.append(x)
+                ys.append(e)
+                Fs.append(f)
+
+        return Xs, ys, Fs
+
     def load_gdb8_forces(self,
         data_dir,
         calibration_file=None,
@@ -103,10 +201,12 @@ class DataLoader():
             cal_map = None
 
         X_gdb11, y_gdb11 = data_utils.load_hdf5_files([
-            os.path.join(data_dir, "ani1_gdb10_ts.h5"),
+            os.path.join(data_dir, "ani1_gdb10_ts.h5")
         ],
         calibration_map=cal_map,
         use_fitted=self.use_fitted)
+
+        
 
         return X_gdb11, y_gdb11
 
