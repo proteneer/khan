@@ -419,12 +419,7 @@ class TrainerMultiTower():
                             tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
 
                             # sum of softplus is still guaranteed to strictly greater than 0.
-                            # tower_near_uncertainty = tf.segment_sum(tower_model_near.atom_uncertainties, m_deq)
                             tower_near_uncertainty = tf.segment_mean(tower_model_near.atom_uncertainties, m_deq)
-
-                            # print(tower_model_near.atom_outputs.shape, tower_model_near.atom_uncertainties.shape)
-                            # assert 0
-
                             # uncertainty
                             # layer_sizes[-1] += 1
 
