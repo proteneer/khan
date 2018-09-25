@@ -69,3 +69,11 @@ def normal(A, mean=0.0, std=1.0):
 
 def gaussian(A):
     return tf.exp(-1*tf.pow(A, 2))
+
+# softplus - ln(2), such that the function passes through the origin (helps initialization)
+def softplus_origin(A):
+    return tf.nn.softplus(A) - 0.69314718056
+
+# waterslide, identity at the origin, gradient is periodic: sin(x)+1
+def waterslide(A):
+    return A + 1 - tf.cos(A)
