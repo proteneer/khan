@@ -314,7 +314,7 @@ class TrainerMultiTower():
         self.non_trainable_variables = []
 
         with tf.device('/cpu:0'):
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-3), trainable=False)
             self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -485,10 +485,7 @@ class TrainerMultiTower():
 
                             p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
                             self.tower_coord_grads.append([p_dx, p_dy, p_dz])
-
-                            self.tower_feat_grads = tf.gradients(tower_pred, [f0, f1, f2, f3])
-                            
-
+    
                             # forces are the negative of the gradient
                             f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
 
@@ -509,17 +506,17 @@ class TrainerMultiTower():
 
             def tower_grads(grads):
                 # (jminuse+ytz: hard disabled for now)
-                use_trust_radius = False
-                if not use_trust_radius:
-                    apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
-                else:
-                    grads, vs = zip(*average_gradients(grads))
-                    trust_radius = 1e-4
-                    grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
-                    apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
+                # use_trust_radius = False
+                # if not use_trust_radius:
+                apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
+                # else:
+                #     grads, vs = zip(*average_gradients(grads))
+                #     trust_radius = 1e-4
+                #     grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
+                #     apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
                 variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
                 variables_averages_op = variable_averages.apply(tf.trainable_variables())
-            return tf.group(apply_gradient_op, variables_averages_op)
+                return tf.group(apply_gradient_op, variables_averages_op)
 
             self.train_op = tower_grads(self.tower_grads)
             self.train_op_forces = tower_grads(self.tower_force_grads)
@@ -1022,7 +1019,7 @@ class TrainerMultiTower():
                         target_ops=train_ops,
                         batch_size=batch_size,
                         before_hooks=self.max_norm_ops),
-                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
+                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]

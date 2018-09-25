@@ -116,10 +116,10 @@ class DataLoader():
             os.path.join(data_dir, "ani_gdb_s01.h5"),
             os.path.join(data_dir, "ani_gdb_s02.h5"),
             os.path.join(data_dir, "ani_gdb_s03.h5"),
-            os.path.join(data_dir, "ani_gdb_s04.h5"),
-            os.path.join(data_dir, "ani_gdb_s05.h5"),
-            os.path.join(data_dir, "ani_gdb_s06.h5"),
-            os.path.join(data_dir, "ani_gdb_s07.h5"),
+            # os.path.join(data_dir, "ani_gdb_s04.h5"),
+            # os.path.join(data_dir, "ani_gdb_s05.h5"),
+            # os.path.join(data_dir, "ani_gdb_s06.h5"),
+            # os.path.join(data_dir, "ani_gdb_s07.h5"),
             # os.path.join(data_dir, "ani_gdb_s08.h5"),
         ]
 
@@ -148,22 +148,16 @@ class DataLoader():
         for f in os.listdir(data_dir):
             if os.path.splitext(f)[-1] == '.out':
                 abspath = os.path.join(data_dir, f)
-                # print(abspath)
                 x, e, f = extract_file(abspath)
-                # print("E", e)
 
                 wb97offset = 0
                 Z = x[:, 0].astype(np.int32)
                 for z in Z:
                     wb97offset += selfIxnNrgWB97X[z]
 
-                # print(wb97offset)
-
-                # assert 0
                 Xs.append(x)
                 ys.append(e)
                 Fs.append(f)
-                assert 0
 
         return Xs, ys, Fs
 
@@ -208,7 +202,6 @@ class DataLoader():
 
         X_gdb11, y_gdb11 = data_utils.load_hdf5_files([
             os.path.join(data_dir, "ani1_gdb10_ts.h5")
-            # os.path.join(data_dir, "ani_gdb_s02.h5")
         ],
         calibration_map=cal_map,
         use_fitted=self.use_fitted)

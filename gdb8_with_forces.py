@@ -15,6 +15,7 @@ import multiprocessing
 import argparse
 import pickle
 
+# import khan.activations
 
 def main():
 
@@ -62,7 +63,7 @@ def main():
     xyf_save = "xyf.pkl"
 
     if os.path.exists(xyf_save):
-        print("fast-loading")
+        print("-------fast-loading-----")
         xyf = pickle.load(open(xyf_save, 'rb'))
     else:
         xyf = data_loader.load_gdb3_forces("/home/yutong/ANI-1_release/qm") # todo: figure out how to split this consistently later    
@@ -108,9 +109,7 @@ def main():
             towers=towers,
             precision=tf.float32,
             layer_sizes=(128, 128, 64, 1),
-            # layer_sizes=(16, 1),
             activation_fn=tf.nn.relu
-            # fit_charges=True,
         )
 
         if os.path.exists(save_dir):
@@ -131,27 +130,20 @@ def main():
         #         print(r)
         #         assert np.any(np.isnan(r)) == False
 
-
         all_grads = []
         for nrg in trainer.predict(rd_train_forces):
-            # print("grad", grad)
             # all_grads.append(grad)
             if np.any(np.isnan(nrg)):
                 print("FATAL NAN FOUND")
                 print(nrg)
                 assert 0
 
-
         all_grads = []
         for grad in trainer.coordinate_gradients(rd_train_forces):
-            # print("grad", grad)
-            # all_grads.append(grad)
             if np.any(np.isnan(grad)):
                 print("FATAL NAN FOUND")
                 print(grad)
                 assert 0
-
-        # assert 0
 
         max_local_epoch_count = 10
 
@@ -162,7 +154,6 @@ def main():
             trainer.unordered_l2s,
             trainer.train_op,
         ]
-
 
         print("------------Starting Training--------------")
 
@@ -179,28 +170,23 @@ def main():
                 if train_forces:
                     train_results_forces = list(trainer.feed_dataset(
                         rd_train_forces,
-                        shuffle=False,
+                        shuffle=True,
                         target_ops=[trainer.train_op_forces, trainer.tower_force_rmses],
                         batch_size=batch_size,
                         before_hooks=trainer.max_norm_ops))
 
                 print("Force training time", time.time()-start_time)
 
-
                 start_time = time.time()
-                # train to energies
                 train_results_energies = list(trainer.feed_dataset(
                     rd_train_forces,
-                    shuffle=False,
+                    shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size,
                     before_hooks=trainer.max_norm_ops))
-                # print("TRE", train_results_energies)
-                # assert 0
 
                 train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test_forces)
-                # gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
 
                 print("Energy training time", time.time()-start_time, "error:", train_abs_rmse, test_abs_rmse)
                 # print(time.time()-start_time, train_abs_rmse, test_abs_rmse, gdb11_abs_rmse)

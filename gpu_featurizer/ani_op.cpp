@@ -4,8 +4,9 @@
 #include "tensorflow/core/framework/types.h"
 
 #include <chrono>
-#include <cmath>
-#include <math.h>
+
+// #include <cmath> needed for std::isfinite when debugging
+// #include <math.h>
 
 #include "memcpy.h"
 #include "parameters.h"
@@ -291,7 +292,7 @@ class AniCombinedGrad : public AniBase<Device> {
 
 
 
-    // CPU MEMORY - USE ONLY WHEN DEBUGGING NANS
+    // CPU MEMORY - USE ONLY WHEN DEBUGGING NANS ON CPU
     // CAUSES SEGFAULT ON GPU
     // auto test_ptr_X = X_grads->flat<NumericType>().data();
     // for(size_t i=0; i < total_num_atoms; i++) {

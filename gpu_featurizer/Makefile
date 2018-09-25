@@ -13,8 +13,7 @@ TF_LFLAGS=-L/home/yutong/venv/lib/python3.5/site-packages/tensorflow -ltensorflo
 SAFE_FAST_MATH=-ftz=true -prec-div=false -prec-sqrt=false -fmad=true
 NVCC_FLAGS=-std=c++11 -arch=sm_61 $(TF_CFLAGS) $(TF_LFLAGS) -ftz=true -Xcompiler -fPIC -O3 -D  GOOGLE_CUDA=1 $(CUDA_INCLUDE_FLAGS) --expt-relaxed-constexpr 
 CC=g++
-# CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
-CC_FLAGS=-std=c++11 -O3 -march=native -fPIC $(TF_CFLAGS)
+CC_FLAGS=-std=c++11 -O3 -Ofast -march=native -fPIC $(TF_CFLAGS)
 # CC_FLAGS=-std=c++11 -g -O2 -march=native -fPIC $(TF_CFLAGS)
 CC_LINK_FLAGS=$(TF_LFLAGS)
 
@@ -61,4 +60,3 @@ memcpy_gpu.o:  memcpy_gpu.cu memcpy.h
 
 clean:
 	rm -f *.o
-
