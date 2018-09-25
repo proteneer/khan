@@ -17,17 +17,21 @@ BOHR_PER_ANGSTROM = 0.52917721092
 kT = 10.0 # kcal/mol
 
 
-def load_NN_models(filenames):
+def load_NN_models(filenames, sess):
+    # files are expected to be in npz format
+    # sess should be an initialized tensorflow session
     models = []
     for n, filename in enumerate(filenames):
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
-        layers = (128, 128, 64, 1)
+        #layers = (128, 128, 64, 1)
+        layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        activation_fn = activations.get_fn_by_name('celu') # TODO: use waterslide
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float32,
+            precision=tf.float64,
             layer_sizes=layers,
-            activation_fn=activations.waterslide,
+            activation_fn=activation_fn,
             fit_charges=False,
         )
         trainer.load_numpy(filename, strict=False)
@@ -116,10 +120,13 @@ def opt_info_func(x_flat, min_Es, models, calc_grad=False):
     
 
 def run_opt(xyz, models):
+    print(xyz)
     # xyz should be in the form [ [element x y z], ... ]
     elements = [row[0] for row in xyz]
     x0 = [row[1:] for row in xyz]
     x0 = np.reshape(x0, len(x0) * 3 )  # flatten coords: [x1 y1 z1 x2 y2 z2 ... ]
+    print(elements)
+    print(x0)
     # get min E for each model
     min_Es = []
     for model in models:
@@ -162,11 +169,11 @@ def test_nn_opt():
     test_xyz = np.array(test_xyz)
     model_filenames = ['/home/jacobson/software/gdb8_committee/committee-%d.scr/save_file.npz' % i for i in [1,2,3,5]]  # note, model 4 not ready yet
     # load NN
-    lib_path = os.path.abspath('khan/gpu_featurizer/ani_cpu.so')
+    lib_path = os.path.abspath('/home/jacobson/software/khan/gpu_featurizer/ani.so')
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
-        models = load_NN_models(model_filenames)
+        models = load_NN_models(model_filenames, sess)
         run_opt(test_xyz, models)
 
 
