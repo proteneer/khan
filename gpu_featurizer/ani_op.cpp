@@ -4,6 +4,8 @@
 #include "tensorflow/core/framework/types.h"
 
 #include <chrono>
+#include <cmath>
+#include <math.h>
 
 #include "memcpy.h"
 #include "parameters.h"
@@ -286,6 +288,36 @@ class AniCombinedGrad : public AniBase<Device> {
       acs,
       params
     );
+
+
+
+    // CPU MEMORY - USE ONLY WHEN DEBUGGING NANS
+    // CAUSES SEGFAULT ON GPU
+    // auto test_ptr_X = X_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_X[i])) {
+    //       throw std::runtime_error("FAILED X");
+    //       printf("X d_y_i_NAN\n");
+    //   }
+    // }
+
+    // auto test_ptr_Y = Y_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_Y[i])) {
+    //       throw std::runtime_error("FAILED Y");
+    //       printf("Y d_y_i_NAN\n");
+    //   }
+    // }
+
+    // auto test_ptr_Z = Z_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_Z[i])) {
+    //       throw std::runtime_error("FAILED Z");
+    //       printf("Z d_y_i_NAN\n");
+
+    //   }
+    // }
+
 
   }
 };

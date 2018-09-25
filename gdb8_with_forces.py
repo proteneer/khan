@@ -3,6 +3,7 @@ import numpy as np
 import time
 import tensorflow as tf
 import sklearn.model_selection
+from sklearn.model_selection import train_test_split
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
@@ -12,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import multiprocessing
 import argparse
+import pickle
 
 
 def main():
@@ -45,22 +47,45 @@ def main():
 
     data_loader = DataLoader(False)
 
-    all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
+    # all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
 
     # todo: ensure disjunction in train_test_valid
-    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
-    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+    # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+    # rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
-    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
-    rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
     batch_size = 1024
+    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
 
+    rd_gdb11 = RawDataset(X_gdb11[3*batch_size:], y_gdb11[3*batch_size:])
     config = tf.ConfigProto(allow_soft_placement=True)
+    xyf_save = "xyf.pkl"
 
-    all_Xs_f, all_Ys_f, all_Fs_f = data_loader.load_gdb8_forces(ANI_TRAIN_DIR) # todo: figure out how to split this consistently later
+    if os.path.exists(xyf_save):
+        print("fast-loading")
+        xyf = pickle.load(open(xyf_save, 'rb'))
+    else:
+        xyf = data_loader.load_gdb3_forces("/home/yutong/ANI-1_release/qm") # todo: figure out how to split this consistently later    
+        pickle.dump(xyf, open(xyf_save, 'wb'))
+    
+    all_Xs_f, all_Ys_f, all_Fs_f = xyf
 
-    rd_train_forces = RawDataset(all_Xs_f, all_Ys_f, all_Fs_f)
+    perm = np.random.permutation(len(all_Ys_f))
+    all_Xs_f, all_Ys_f, all_Fs_f = [all_Xs_f[i] for i in perm], [all_Ys_f[i] for i in perm], [all_Fs_f[i] for i in perm]
+
+    frac = int(len(all_Fs_f)*0.75)
+
+    x_train, y_train, f_train = all_Xs_f[:frac], all_Ys_f[:frac], all_Fs_f[:frac]
+    x_test, y_test, f_test = all_Xs_f[frac:], all_Ys_f[frac:], all_Fs_f[frac:]
+
+    # x_train, y_train, f_train, x_test, y_test, f_test = train_test_split(all_Xs_f, all_Ys_f, all_Fs_f, test_size=0.25)
+
+    # print(all_Fs_f.shape, f_train.shape)
+    # for f in f_train:
+        # print(f.shape)
+
+    rd_train_forces = RawDataset(x_train, y_train, f_train)
+    rd_test_forces = RawDataset(x_test, y_test)
 
     with tf.Session(config=config) as sess:
 
@@ -83,6 +108,8 @@ def main():
             towers=towers,
             precision=tf.float32,
             layer_sizes=(128, 128, 64, 1),
+            # layer_sizes=(16, 1),
+            activation_fn=tf.nn.relu
             # fit_charges=True,
         )
 
@@ -91,6 +118,40 @@ def main():
             trainer.load(save_dir)
         else:
             trainer.initialize() # initialize to random variables
+
+        # for res in trainer.feed_dataset(
+        #     rd_gdb11,
+        #     shuffle=False,
+        #     target_ops=[trainer.tower_feat_grads],
+        #     batch_size=batch_size):
+        #     print(type(res))
+        #     for r in res[0]:
+        #         # print(type(res[0]))
+        #         # print(type(r))
+        #         print(r)
+        #         assert np.any(np.isnan(r)) == False
+
+
+        all_grads = []
+        for nrg in trainer.predict(rd_train_forces):
+            # print("grad", grad)
+            # all_grads.append(grad)
+            if np.any(np.isnan(nrg)):
+                print("FATAL NAN FOUND")
+                print(nrg)
+                assert 0
+
+
+        all_grads = []
+        for grad in trainer.coordinate_gradients(rd_train_forces):
+            # print("grad", grad)
+            # all_grads.append(grad)
+            if np.any(np.isnan(grad)):
+                print("FATAL NAN FOUND")
+                print(grad)
+                assert 0
+
+        # assert 0
 
         max_local_epoch_count = 10
 
@@ -115,30 +176,33 @@ def main():
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
                 start_time = time.time()
-                # train to forces
                 if train_forces:
                     train_results_forces = list(trainer.feed_dataset(
                         rd_train_forces,
-                        shuffle=True,
+                        shuffle=False,
                         target_ops=[trainer.train_op_forces, trainer.tower_force_rmses],
                         batch_size=batch_size,
                         before_hooks=trainer.max_norm_ops))
-                    print(train_results_forces, end=" | ")
 
-                print(time.time()-start_time)
+                print("Force training time", time.time()-start_time)
 
-                #train to energies
-                # train_results_energies = list(trainer.feed_dataset(
-                #     rd_train,
-                #     shuffle=True,
-                #     target_ops=train_ops,
-                #     batch_size=batch_size,
-                #     before_hooks=trainer.max_norm_ops))
 
-                # train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                # test_abs_rmse = trainer.eval_abs_rmse(rd_test)
+                start_time = time.time()
+                # train to energies
+                train_results_energies = list(trainer.feed_dataset(
+                    rd_train_forces,
+                    shuffle=False,
+                    target_ops=train_ops,
+                    batch_size=batch_size,
+                    before_hooks=trainer.max_norm_ops))
+                # print("TRE", train_results_energies)
+                # assert 0
+
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                test_abs_rmse = trainer.eval_abs_rmse(rd_test_forces)
                 # gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
 
+                print("Energy training time", time.time()-start_time, "error:", train_abs_rmse, test_abs_rmse)
                 # print(time.time()-start_time, train_abs_rmse, test_abs_rmse, gdb11_abs_rmse)
 
 

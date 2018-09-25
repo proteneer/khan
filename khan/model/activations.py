@@ -69,3 +69,7 @@ def normal(A, mean=0.0, std=1.0):
 
 def gaussian(A):
     return tf.exp(-1*tf.pow(A, 2))
+
+def waterslide(A):
+    a = 0.5
+    return A + (1 - tf.cos(A/a))*a
