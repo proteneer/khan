@@ -931,7 +931,7 @@ class TrainerMultiTower():
                         target_ops=train_ops,
                         batch_size=batch_size,
                         before_hooks=self.max_norm_ops),
-                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
+                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]

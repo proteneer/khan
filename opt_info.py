@@ -26,14 +26,15 @@ def load_NN_models(filenames, sess):
         #layers = (128, 128, 64, 1)
         layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
         activation_fn = activations.get_fn_by_name('celu') # TODO: use waterslide
-        trainer = TrainerMultiTower(
-            sess,
-            towers=towers,
-            precision=tf.float64,
-            layer_sizes=layers,
-            activation_fn=activation_fn,
-            fit_charges=False,
-        )
+        with tf.variable_scope("model%d" % n):
+            trainer = TrainerMultiTower(
+                sess,
+                towers=towers,
+                precision=tf.float64,
+                layer_sizes=layers,
+                activation_fn=activation_fn,
+                fit_charges=False,
+            )
         trainer.load_numpy(filename, strict=False)
         models.append(trainer)
     return models
