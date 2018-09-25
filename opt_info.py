@@ -1,7 +1,5 @@
 """
-Functions for fitting force field parameters given energy and geometry data
-
-Copyright Schrodinger LLC, All Rights Reserved.
+Optimizer for molecular geometries in terms of "expected information gain"
 """
 
 import os
@@ -19,7 +17,7 @@ BOHR_PER_ANGSTROM = 0.52917721092
 kT = 10.0 # kcal/mol
 
 
-def load_NN_models(filenames=['example.npz']):
+def load_NN_models(filenames):
     models = []
     for n, filename in enumerate(filenames):
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
@@ -37,12 +35,14 @@ def load_NN_models(filenames=['example.npz']):
     return models
 
 
-def model_E_and_grad(xyz, model):
-    # xyz must be element, x, y, z
+def model_E_and_grad(xyz, elements, model):
+    # xyz and elements must be merged into [element, x, y, z]
     # model must be a Trainer object
+    nn_atom_types = [data_utils.atomic_number_to_atom_id(elem) for elem in elements]
+    xyz = np.stack(nn_atom_types, xyz, axis=-1)
     rd = RawDataset([xyz], [0.0])
     energy = float(model.predict(rd)[0])
-    self_interaction = sum(data_utils.selfIxnNrgWB97X_631gdp[atom[0]] for atom in xyz)
+    self_interaction = np.sum(data_utils.selfIxnNrgWB97X_631gdp[t] for t in nn_atom_types)
     energy += self_interaction
     gradient = list(model.coordinate_gradients(rd))[0]
     natoms, ndim = gradient.shape
@@ -51,21 +51,21 @@ def model_E_and_grad(xyz, model):
     return energy, gradient
 
 
-def opt_E_func(x_flat, model_params):
+def opt_E_func(x_flat, elements, model):
     # basic energy function to optimize, for finding min_E
     xyz = np.reshape(x_flat, (-1, 3))
-    E, grad = model_E_and_grad(xyz, model)
+    E, grad = model_E_and_grad(xyz, elements, model)
     return E#, grad
 
 
-def opt_P_func(x_flat, min_Es, models, calc_grad=False):
+def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     # more advanced objective function, giving mean probability
     # for initial probability maximization, balancing between models
-    xyz = np.reshape(x_flat, (-1, 4))
+    xyz = np.reshape(x_flat, (-1, 3))
     Es = []
     dEdx, dEdy, dEdz = [], [], []
     for min_E, model_params in zip(min_Es, models):
-        E, grad = model_E_and_grad(xyz, model)
+        E, grad = model_E_and_grad(xyz, elements, model)
         rel_E = (E - min_E) / kT
         Es.append(rel_E)
         dEdx.append(grad / kT)
@@ -92,8 +92,13 @@ def opt_info_func(x_flat, min_Es, models, calc_grad=False):
     Es = np.array(Es)
     exp_Es = np.exp(-Es)
     P = np.mean(exp_Es)
-    info = np.std(Es)
-    expected_info = P*info
+    # The following assumes that model errors are roughly Gaussian
+    # If Laplacian, 2*(mean absolute difference from median) would be used
+    # to approximate the spread of energies, instead of stddev
+    # which would be more robust but harder to find the gradient of
+    info = np.log(np.std(Es))
+    uniqueness = 1.0
+    expected_info = P * info * uniqueness
     if not calc_grad:
         return -expected_info
 
@@ -110,31 +115,34 @@ def opt_info_func(x_flat, min_Es, models, calc_grad=False):
     return -expected_info, -dexpected_info_dx 
     
 
-def run_opt():
-    xyz = 'Load me from a file'
-    models = load_NN_models(filenames=['example1.npz', 'example2.npz'])
-    x0 = np.reshape(xyz, len(xyz) * 4 )  # flatten coords: [i1 x1 y1 z1 i2 x2 y2 z2 ... ]
+def run_opt(xyz, models):
+    # xyz should be in the form [ [element x y z], ... ]
+    elements = [row[0] for row in xyz]
+    x0 = [row[1:] for row in xyz]
+    x0 = np.reshape(x0, len(x0) * 3 )  # flatten coords: [x1 y1 z1 x2 y2 z2 ... ]
     # get min E for each model
     min_Es = []
     for model in models:
         # optimize energy for this model
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(model,), iprint=0, factr=1e1, approx_grad=True)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e1, approx_grad=True)
         min_x, min_E, success = result
         min_Es.append(min_E)
         print('model', model_params, '=> min_E', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(min_Es, models), iprint=0, factr=1e1, approx_grad=True)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e1, approx_grad=True)
     x0, P0, success = result
     print('P0 =', -P0)
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, False))
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, x0, args=(min_Es, models), iprint=0, factr=1e1, approx_grad=True)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e1, approx_grad=True)
     x_final, fun_final, success = result
-    print( 'Final expected info =', -fun_final)
-    xyz = np.reshape(x_final, (-1, 4))
-    print('xyz =', xyz)
+    print('Final expected info =', -fun_final)
+    print('Final xyz coords:')
+    xyz = np.reshape(x_final, (-1, 3))
+    for el, xx in zip(elements, xyz):
+        print(el, xx)
     
     # for testing gradients
     print_gradient_per_atom = False
@@ -146,13 +154,20 @@ def run_opt():
         for i, atom, analytical_grad, numerical_grad in zip(range(len(st.atom)), st.atom, analytical_grads, numerical_grads):
             print(i+1, atom.element, analytical_grad, numerical_grad)
 
+
 def test_nn_opt():
     # Load NN models from existing files
     # Todo: store layer sizes and activations in file too
+    test_xyz = [ [8, 0.0, 0.0, 0.0], [1, 1.0, 0.0, 0.0], [1, 0.0, 1.0, 0.0] ]
+    test_xyz = np.array(test_xyz)
+    model_filenames = ['/home/jacobson/software/gdb8_committee/committee-%d.scr/save_file.npz' % i for i in [1,2,3,5]]  # note, model 4 not ready yet
+    # load NN
     lib_path = os.path.abspath('khan/gpu_featurizer/ani_cpu.so')
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
-        run_opt()
+        models = load_NN_models(model_filenames)
+        run_opt(test_xyz, models)
+
 
 test_nn_opt()
