@@ -1,5 +1,6 @@
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
+from khan.model import activations
 from data_utils import load_reactivity_data, read_all_reactions 
 import tensorflow as tf
 import argparse
@@ -124,7 +125,9 @@ def main():
     lib_path = os.path.abspath(args.ani_lib)
     initialize_module(lib_path)
 
-    save_dir = os.path.join(args.work_dir, "save")
+    save_file = os.path.join(args.save_dir, "save_file.npz")
+    if not os.path.exists(save_file):
+        raise IOError("Saved NN numpy file does not exist")
 
     _, _, X_test, y_test, X_big, y_big = load_reactivity_data(args.reactivity_dir, 1.0)
     small_reactions, big_reactions = read_all_reactions(args.reactivity_dir)
@@ -135,15 +138,21 @@ def main():
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
         towers = ["/cpu:0"]
+        layers = (128, 128, 64, 1)
+        if args.deep_network:
+            layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        activation_fn = activations.get_fn_by_name(args.activation_function)
+
         trainer = TrainerMultiTower(
             sess,
-            towers,
-            layer_sizes=(128, 128, 64, 1),
+            towers=towers,
+            precision=tf.float64,
+            layer_sizes=layers,
+            activation_fn=activation_fn,
             fit_charges=args.fit_charges,
-            gaussian_activation=args.gaussian_activation
         )
 
-        trainer.load(save_dir)
+        trainer.load_numpy(save_file)
 
         if args.analyze_reaction_errors:
 
@@ -270,9 +279,9 @@ def main():
 def parse_args(args):
     parser = argparse.ArgumentParser(description="test ANI1 NN", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("--work-dir", default="~/work", help="location of saved NN")
+    parser.add_argument('--save-dir', default='~/work', help="Location where save data is dumped. If the folder does not exist then it will be created.")
     parser.add_argument("--reactivity-dir", default=None, help="location of reactivity data to test")
-    parser.add_argument("--ani_lib", required=True, help="Location of shared object")
+    parser.add_argument("--ani-lib", required=True, help="Location of shared object")
     parser.add_argument(
         "--analyze_raw_errors",
         action="store_true",
@@ -280,26 +289,33 @@ def parse_args(args):
         help="analyze raw errors in test set"
     )
     parser.add_argument(
-        "--analyze_reaction_errors",
+        "--analyze-reaction-errors",
         action="store_true",
         default=False,
         help="analyze error in barrier heights and reaction energies"
     )
     parser.add_argument(
-        "--write_comparison_data",
+        "--write-comparison-data",
         action="store_true",
         default=False,
         help="write data to visualize energy along path"
     )
     parser.add_argument(
-        '--gaussian-activation',
+        '--deep-network',
         action='store_true',
-        help='Use gaussian activation functions'
+        help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)'
     )
     parser.add_argument(
         '--fit-charges',
         action='store_true',
         help='fit charges'
+    )
+    parser.add_argument(
+        '--activation-function',
+        type=str,
+        choices=activations.get_all_fn_names(),
+        help='choice of activation function',
+        default="celu"
     )
     
     args = parser.parse_args()

@@ -486,6 +486,7 @@ class TrainerMultiTower():
                             self.tower_force_grads.append(tower_force_grad)
 
             def tower_grads(grads):
+                # (jminuse+ytz: hard disabled for now)
                 use_trust_radius = False
                 if not use_trust_radius:
                     apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)

@@ -3,6 +3,7 @@
 
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
+from khan.model import activations
 import data_utils
 from analyze_errors import fdiff_grad
 import tensorflow as tf
@@ -30,12 +31,13 @@ def parse_args(args):
     )
 
     parser.add_argument(
-        "--work-dir",
-        default="~/work",
-        help="location of saved NN"
+        '--save-dir',
+        default='~/work',
+        help="Location of saved NN"
     )
+
     parser.add_argument(
-        "--ani_lib",
+        "--ani-lib",
         default="/Users/jacobson/projects/ani1_training/khan/gpu_featurizer/ani_cpu.so", 
         help="Location of shared object"
     )
@@ -55,25 +57,25 @@ def parse_args(args):
     )
 
     parser.add_argument(
-        '--deep_network',
+        '--deep-network',
         action='store_true',
         help='Use James super deep network (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)'
     )
-
-    parser.add_argument(
-        '--gaussian-activation',
-        action='store_true',
-        help='Use gaussian activation functions'
-    )
-
     parser.add_argument(
         '--fit-charges',
         action='store_true',
         help='fit charges'
     )
+    parser.add_argument(
+        '--activation-function',
+        type=str,
+        choices=activations.get_all_fn_names(),
+        help='choice of activation function',
+        default="celu"
+    )
 
     parser.add_argument(
-        "--fdiff_grad",
+        "--fdiff-grad",
         action="store_true",
         default=False,
         help="finite difference the gradients"
@@ -97,25 +99,29 @@ def main():
     lib_path = os.path.abspath(args.ani_lib)
     initialize_module(lib_path)
 
-    save_dir = os.path.join(args.work_dir, "save")
+    save_file = os.path.join(args.save_dir, "save_file.npz")
+    if not os.path.exists(save_file):
+        raise IOError("Saved NN numpy file does not exist")
 
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
 
-        layer_sizes = (128, 128, 64, 1)
-        if args.deep_network:
-            layer_sizes = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
         towers = ["/cpu:0"]
-        print("start with layers", layer_sizes)
+        layers = (128, 128, 64, 1)
+        if args.deep_network:
+            layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        activation_fn = activations.get_fn_by_name(args.activation_function)
+
         trainer = TrainerMultiTower(
             sess,
-            towers,
-            layer_sizes=layer_sizes,
+            towers=towers,
+            precision=tf.float64,
+            layer_sizes=layers,
+            activation_fn=activation_fn,
             fit_charges=args.fit_charges,
-            gaussian_activation=args.gaussian_activation
         )
 
-        trainer.load(save_dir)
+        trainer.load_numpy(save_file, strict=False)
 
         s = client_server.connect_socket(args.host, args.port, server=True)
 
@@ -141,7 +147,7 @@ def main():
                 if rcv_data:
 
                     X = json.loads(rcv_data).get('X') 
-                    X_np = np.array(X, dtype=np.float32)
+                    X_np = np.array(X, dtype=np.float64)
                     rd = RawDataset([X_np], [0.0])
 
                     # should I go back to total energy?
