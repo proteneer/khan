@@ -3,13 +3,12 @@
 #include <iostream>
 
 #include <cmath>
-#include <math.h>
 #include "functor_op.h"
 #include "parameters.h"
 // #include "numeric_helpers.h"
 
-using std::isinf;
-using std::isnan;
+// using std::isinf;
+// using std::isnan;
 
 static inline int linearize(int i, int j, int k, int l, AniParams params) {
     if(j < i) {
@@ -347,7 +346,7 @@ void featurize_grad_cpu(
 
 
                                     NumericType d_y_i = angular_feature_buffer_i[linearize(an_j, an_k, t, s, params)];   
-                                    if(isnan(d_y_i)) {
+                                    if(std::isnan(d_y_i)) {
                                         printf("d_y_i_NAN");
                                     }
                                     NumericType dij = sqrt(pow(i_x - j_x, 2) + pow(i_y - j_y, 2) + pow(i_z - j_z, 2));
