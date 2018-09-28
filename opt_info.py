@@ -92,44 +92,44 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     # TODO: add "similarity to points already guessed" as a metric here
     # The use of a similarity metric implies we have a prior about which
     # points are likely to be the same as each other
-    xyz = np.reshape(x_flat, (-1, 3))
-    Es = []
-    dEdx, dEdy, dEdz = [], [], []
-    for min_E, model in zip(min_Es, models):
-        E, grad = model_E_and_grad(xyz, elements, model)
-        rel_E = (E - min_E)
-        Es.append(rel_E)
-        dEdx.append(grad)
-    Es = np.array(Es)
-    exp_Es = np.exp(-Es)
-    P = np.mean(exp_Es)
-    # The following assumes that model errors are roughly Gaussian
-    # If Laplacian, 2*(mean absolute difference from median) would be used
-    # to approximate the spread of energies, instead of stddev
-    # which would be more robust but harder to find the gradient of
-    if False:
-        info = np.log(np.std(Es)) # Gaussian assumption
-    else:
-        info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
-    uniqueness = 1.0
-    expected_info = P * info * uniqueness
+    n_results = len(x_flat) // len(elements)
+    xyzs = np.reshape(x_flat, (-1, 3))
+    expected_info_gain_per_point = []
+    for n in range(n_results):
+        Es = []
+        xyz = xyzs[n*len(elements) : (n+1)*len(elements)]
+        for min_E, model in zip(min_Es, models):
+            E, grad = model_E_and_grad(xyz, elements, model)
+            rel_E = (E - min_E)
+            Es.append(rel_E)
+            dEdx.append(grad)
+        Es = np.array(Es)
+        exp_Es = np.exp(-Es)
+        P = np.mean(exp_Es)
+        if False:
+            info = np.log(np.std(Es)) # Gaussian assumption
+        else:
+            info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
+        expected_info_gain_per_point.append( P * info )
+    for n1 in range(n_results):
+        similarity_sum = 0.0
+        for n2 in range(n_results):
+           if n1==n2: continue
+           xyz1 = xyzs[n1*len(elements) : (n1+1)*len(elements)]
+           xyz2 = xyzs[n2*len(elements) : (n2+1)*len(elements)]
+           coul_mat1 = coul_mat(xyz1)
+           coul_mat2 = coul_mat(xyz2)
+           difference = np.sum((dist_mat1 - dist_mat2)**2)
+           curvature = 1.0 # wild guess
+           similarity_sum += np.exp( -difference * curvature / kT )
+        # note, max of n_results is n_results
+        uniqueness = 1.0 - similarity_sum / n_results
+        expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
-        return -expected_info
-
-    # note, something is wrong with this gradient:
-    # does not agree with the numerical gradient
-    dEdx = np.array(dEdx)
-    dEdx = dEdx.T  # shape = (3*n_atoms) x (n_models)
-    dP_dx = -np.mean(dEdx * exp_Es, axis=1) # shape = (3*n_atoms
-    dinfo_dx = (np.mean(Es * dEdx) - np.mean(Es) * np.mean(dEdx, axis=1)) / info
-    #return -P, -dP_dx
-    #return -info, -dinfo_dx
-    dexpected_info_dx = dP_dx*info + P*dinfo_dx # shape = (3*n_atoms
-
-    return -expected_info, -dexpected_info_dx 
+        return -sum(expected_info_gain_per_point) # - because we want to maximize, not minimize
     
 
-def run_opt(xyz, models):
+def run_opt(xyz, models, n_results=1):
     print(xyz)
     # xyz should be in the form [ [element x y z], ... ]
     elements = [row[0] for row in xyz]
@@ -142,27 +142,32 @@ def run_opt(xyz, models):
     for model in models:
         # optimize energy for this model
         print('Trying initial energy optimization for model', model)
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, approx_grad=True)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
         min_x, min_E, success = result
         min_Es.append(min_E)
         print('model min_E =', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e3, approx_grad=True)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e3, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
     x0, P0, success = result
     print('P0 =', -P0)
     print('Max P geometry:', x0)
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, x0, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True)
+    xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
+    xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
     xyz = np.reshape(x_final, (-1, 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
-    for el, xx in zip(elements, xyz):
-        print(element_names[el], '%f %f %f' % tuple(xx))
+    for n in n_results:
+        print(len(elements))
+        print('Result', n)
+        for el, xx in zip(elements, xyz[n*len(elements) : (n+1)*len(elements)]):
+            print(element_names[el], '%f %f %f' % tuple(xx))
     
     # for testing gradients
     print_gradient_per_atom = False
