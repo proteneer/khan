@@ -5,6 +5,9 @@
 
 #include <chrono>
 
+// #include <cmath> needed for std::isfinite when debugging
+// #include <math.h>
+
 #include "memcpy.h"
 #include "parameters.h"
 #include "functor_op.h"
@@ -38,13 +41,13 @@ class AniBase : public OpKernel {
     std::vector<float> tmp_A_Rs;
     OP_REQUIRES_OK(context, context->GetAttr("A_Rs", &tmp_A_Rs));
 
-    context->allocate_persistent(DT_FLOAT, {tmp_R_Rs.size()}, &R_Rs_, nullptr);
-    context->allocate_persistent(DT_FLOAT, {tmp_A_thetas.size()}, &A_thetas_, nullptr);
-    context->allocate_persistent(DT_FLOAT, {tmp_A_Rs.size()}, &A_Rs_, nullptr);
+    context->allocate_persistent(DT_FLOAT, {static_cast<long long>(tmp_R_Rs.size())}, &R_Rs_, nullptr);
+    context->allocate_persistent(DT_FLOAT, {static_cast<long long>(tmp_A_thetas.size())}, &A_thetas_, nullptr);
+    context->allocate_persistent(DT_FLOAT, {static_cast<long long>(tmp_A_Rs.size())}, &A_Rs_, nullptr);
 
-    device_memcpy<Device>(R_Rs_.AccessTensor(context)->flat<float>().data(), tmp_R_Rs);
-    device_memcpy<Device>(A_thetas_.AccessTensor(context)->flat<float>().data(), tmp_A_thetas);
-    device_memcpy<Device>(A_Rs_.AccessTensor(context)->flat<float>().data(), tmp_A_Rs);
+    device_memcpy<Device>(R_Rs_.AccessTensor(context)->template flat<float>().data(), tmp_R_Rs);
+    device_memcpy<Device>(A_thetas_.AccessTensor(context)->template flat<float>().data(), tmp_A_thetas);
+    device_memcpy<Device>(A_Rs_.AccessTensor(context)->template flat<float>().data(), tmp_A_Rs);
 
 
     // todo: declare const-ness etc.
@@ -58,9 +61,9 @@ class AniBase : public OpKernel {
     params.Num_A_thetas = A_thetas_.NumElements();
     params.Num_A_Rs = A_Rs_.NumElements();
 
-    params.R_Rs = R_Rs_.AccessTensor(context)->flat<float>().data();
-    params.A_thetas = A_thetas_.AccessTensor(context)->flat<float>().data();
-    params.A_Rs = A_Rs_.AccessTensor(context)->flat<float>().data();
+    params.R_Rs = R_Rs_.AccessTensor(context)->template flat<float>().data();
+    params.A_thetas = A_thetas_.AccessTensor(context)->template flat<float>().data();
+    params.A_Rs = A_Rs_.AccessTensor(context)->template flat<float>().data();
  }
 
  protected:
@@ -122,22 +125,22 @@ class AniCombined : public AniBase<Device> {
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "h_feat",
-      TensorShape({acs[0]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[0]*total_feat_size)}),
       &X_feat_H)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "c_feat",
-      TensorShape({acs[1]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[1]*total_feat_size)}),
       &X_feat_C)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "n_feat",
-      TensorShape({acs[2]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[2]*total_feat_size)}),
       &X_feat_N)
     );
     OP_REQUIRES_OK(context, context->allocate_output(
       "o_feat",
-      TensorShape({acs[3]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[3]*total_feat_size)}),
       &X_feat_O)
     );
 
@@ -287,6 +290,36 @@ class AniCombinedGrad : public AniBase<Device> {
       params
     );
 
+
+
+    // CPU MEMORY - USE ONLY WHEN DEBUGGING NANS ON CPU
+    // CAUSES SEGFAULT ON GPU
+    // auto test_ptr_X = X_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_X[i])) {
+    //       throw std::runtime_error("FAILED X");
+    //       printf("X d_y_i_NAN\n");
+    //   }
+    // }
+
+    // auto test_ptr_Y = Y_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_Y[i])) {
+    //       throw std::runtime_error("FAILED Y");
+    //       printf("Y d_y_i_NAN\n");
+    //   }
+    // }
+
+    // auto test_ptr_Z = Z_grads->flat<NumericType>().data();
+    // for(size_t i=0; i < total_num_atoms; i++) {
+    //   if(!std::isfinite(test_ptr_Z[i])) {
+    //       throw std::runtime_error("FAILED Z");
+    //       printf("Z d_y_i_NAN\n");
+
+    //   }
+    // }
+
+
   }
 };
 
@@ -365,25 +398,25 @@ class AniCombinedGradInverse : public AniBase<Device> {
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "h_grads",
-      TensorShape({acs[0]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[0]*total_feat_size)}),
       &output_H_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "c_grads",
-      TensorShape({acs[1]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[1]*total_feat_size)}),
       &output_C_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "n_grads",
-      TensorShape({acs[2]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[2]*total_feat_size)}),
       &output_N_grads)
     );
 
     OP_REQUIRES_OK(context, context->allocate_output(
       "o_grads",
-      TensorShape({acs[3]*total_feat_size}),
+      TensorShape({static_cast<long long>(acs[3]*total_feat_size)}),
       &output_O_grads)
     );
 

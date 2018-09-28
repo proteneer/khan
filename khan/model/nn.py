@@ -32,7 +32,13 @@ class AtomNN():
         self.Ws = []
         self.bs = []
         self.As = [features] # neurons
+        self.uncertainty_Ws = []
+        self.uncertainty_bs = []
+        self.uncertainty_As = []
+
         self.atom_type = atom_type
+
+        interception_count = 2
 
         # self.alpha = tf.get_variable(prefix+'_'+atom_type+'_alpha', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
 
@@ -42,6 +48,7 @@ class AtomNN():
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
             with tf.device('/cpu:0'):
+
                 W = tf.get_variable(
                     prefix+"W"+name,
                     (x, y),
@@ -58,26 +65,62 @@ class AtomNN():
                     trainable=True
                 )
 
+                # interception layers
+                if idx >= len(layer_sizes) - interception_count:
+                    u_W = tf.get_variable(
+                        prefix+"u_W"+name,
+                        (x, y),
+                        precision,
+                        tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
+                        trainable=True
+                    )
+                    u_b = tf.get_variable(
+                        prefix+"u_b"+name,
+                        (y),
+                        precision,
+                        tf.zeros_initializer,
+                        trainable=True
+                    )
+
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
                 A = activation_fn(A)
+
+
+
+            if idx == len(layer_sizes) - interception_count:
+                u_A = tf.matmul(self.As[-1], u_W) + u_b
+                if idx != len(layer_sizes) - 1:
+                    u_A = activation_fn(u_A)
+                else:
+                    u_A = tf.nn.softplus(u_A)
+
+
+            elif idx > len(layer_sizes) - interception_count:
+                u_A = tf.matmul(self.uncertainty_As[-1], u_W) + u_b
+                if idx != len(layer_sizes) - 1:
+                    u_A = activation_fn(u_A)
+                else:
+                    u_A = tf.nn.softplus(u_A)
+
+
+                print(A.shape, u_A.shape)
 
             self.Ws.append(W)
             self.bs.append(b)
             self.As.append(A)
 
+            if idx >= len(layer_sizes) - interception_count:
+                self.uncertainty_Ws.append(u_W)
+                self.uncertainty_bs.append(u_b)
+                self.uncertainty_As.append(u_A)
+
     def get_parameters(self):
-        return self.Ws + self.bs
+        return self.Ws + self.bs + self.uncertainty_Ws + self.uncertainty_bs
 
     def atom_energies(self):
         """
-        Generate one layer in the atomic differentiated dense structure.
-        
-        Parameters
-        ----------
-        batch_atom_features: tf.Tensor
-            A tensor of shape (num_atoms, feature_size) representing a collection of atomic
-            energies to be evaluated.
+        Retriever the tf.Tensor corresponding to the energies of each atom.
 
         Returns
         -------
@@ -87,40 +130,17 @@ class AtomNN():
         """
         return self.As[-1]
 
-def mnn_staging():
+    def atom_uncertainties(self):
+        """
+        Retriever the tf.Tensor corresponding to the energies of each atom.
 
-    x_enq = tf.placeholder(dtype=tf.float32)
-    y_enq = tf.placeholder(dtype=tf.float32)
-    z_enq = tf.placeholder(dtype=tf.float32)
-    a_enq = tf.placeholder(dtype=tf.int32)
-    m_enq = tf.placeholder(dtype=tf.int32)
-    si_enq = tf.placeholder(dtype=tf.int32)
-    gi_enq = tf.placeholder(dtype=tf.int32)
-    ac_enq = tf.placeholder(dtype=tf.int32)
-    y_trues = tf.placeholder(dtype=tf.float32)
+        Returns
+        -------
+        tf.Tensor
+            A tensor of shape (num_atoms,) of computed energies
 
-    staging = tf.contrib.staging.StagingArea(
-        capacity=10, dtypes=[
-            tf.float32,  # Xs
-            tf.float32,  # Ys
-            tf.float32,  # Zs
-            tf.int32,    # As
-            tf.int32,    # mol ids
-            tf.int32,    # scatter idxs
-            tf.int32,    # gather  idxs
-            tf.int32,    # atom counts
-            tf.float32   # Y TRUEss
-        ])
-
-    put_op = staging.put([x_enq, y_enq, z_enq, a_enq, m_enq, si_enq, gi_enq, ac_enq, y_trues])
-    get_op = staging.get()
-
-    return [
-        (x_enq,     y_enq,     z_enq,     a_enq,     m_enq,     si_enq,    gi_enq,    ac_enq,    y_trues),
-        get_op,
-        # (get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6], get_op[7], get_op[8]),
-        put_op
-    ]
+        """
+        return self.uncertainty_As[-1]
 
 
 class MoleculeNN():
@@ -159,6 +179,7 @@ class MoleculeNN():
 
         max_atom_types = len(type_map)
         atom_type_nrgs = [] # len of type-map, one batch of energies for each atom_type
+        atom_type_uncertainties = []
         self.feats = atom_type_features
         self.anns = []
 
@@ -166,10 +187,17 @@ class MoleculeNN():
             ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, activation_fn,
                 atom_type=atom_type, prefix=prefix)
             self.anns.append(ann)
+
             atom_type_nrgs.append(ann.atom_energies())
+            atom_type_uncertainties.append(ann.atom_uncertainties())
+
 
         self.atom_outputs = tf.gather(tf.concat(atom_type_nrgs, axis=0), gather_idxs)
         self.atom_outputs = tf.reshape(self.atom_outputs, (-1, )) # (batch_size,)
+
+        self.atom_uncertainties = tf.gather(tf.concat(atom_type_uncertainties, axis=0), gather_idxs)
+
+        self.atom_uncertainties = tf.reshape(self.atom_uncertainties, (-1, )) # (batch_size,)
         # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
     def get_parameters(self):

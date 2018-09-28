@@ -59,7 +59,12 @@ def main():
 
     batch_size = 1024
 
-    config = tf.ConfigProto(allow_soft_placement=True)
+    config = tf.ConfigProto(
+        allow_soft_placement=True, 
+        log_device_placement=False
+    )
+
+    # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.OFF
 
     with tf.Session(config=config) as sess:
 
@@ -79,6 +84,8 @@ def main():
 
         # activation_fn = activations.get_fn_by_name("celu") # if you want to use the command line.
         activation_fn = activations.celu # preferred
+        # activation_fn = activations.waterslide
+        # activation_fn = tf.nn.relu
         # activation_fn = tf.nn.selu
         # activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
         # activation_fn = activations.get_fn_by_name("normal", 0.5, 0.2)
@@ -101,8 +108,9 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float32,
-            layer_sizes=(128, 128, 64, 1),
+            precision=tf.float64,
+            # layer_sizes=(128, 128, 128, 64, 64, 64, 1),
+            layer_sizes=(258, 128, 64, 1),
             activation_fn=activation_fn,
             fit_charges=False,
         )
@@ -116,7 +124,7 @@ def main():
                 os.makedirs(ANI_SAVE_DIR)
             trainer.initialize() # initialize to random variables
 
-        max_local_epoch_count = 10
+        max_local_epoch_count = 100
 
         train_ops = [
             trainer.global_epoch_count,
@@ -126,9 +134,21 @@ def main():
             trainer.train_op,
         ]
 
+        # norm_ops = [
+            # trainer.tower_norms
+        # ]
+
+        print("NUM_TOWER_NORMS", len(trainer.tower_norms))
+
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         # Uncomment if you'd like to inspect the gradients
+        all_grads = []
+        # for feat in trainer.featurize(rd_test):
+            # np.save('debug',feat)
+            # assert 0
+            # all_grads.append(grad)
+
         # all_grads = []
         # for grad in trainer.coordinate_gradients(rd_test):
         #     all_grads.append(grad)
@@ -144,6 +164,15 @@ def main():
 
                 # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
 
+                # norm_results = list(trainer.feed_dataset(
+                #     rd_train,
+                #     shuffle=True,
+                #     target_ops=trainer.tower_norms,
+                #     batch_size=batch_size))
+
+                # print(norm_results)
+                # assert 0
+
                 start_time = time.time()
                 train_results = list(trainer.feed_dataset(
                     rd_train,
@@ -158,18 +187,41 @@ def main():
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
 
+                # print("tower_g_norm", train_results[-1])
+
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
-                if test_abs_rmse < best_test_score:
-                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
 
-                    best_test_score = test_abs_rmse
-                    sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
-                else:
-                    sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
+                if local_epoch_count % 20 == 0:
+                    print("\nTesting uncertainty...")
+                    E_pred = trainer.predict(rd_gdb11)
+                    E_uncertainty = trainer.predict_uncertainties(rd_gdb11)
+                    E_abs = np.abs(np.array(E_pred) - np.array(y_gdb11))
+                    
+                    import matplotlib.pyplot as plt
+
+                    plt.clf()
+                    plt.scatter(E_abs, E_uncertainty, s=0.1)
+                    plt.savefig('gdb10_'+str(global_epoch), dpi=400)
+
+                    print(E_abs.shape, E_uncertainty[0].shape)
+                    print((E_abs/E_uncertainty).shape)
+
+                    plt.clf()
+                    plt.hist(E_abs/E_uncertainty, bins=50)
+                    plt.savefig('gdb10_hist_'+str(global_epoch), dpi=400)                   
+
+                # if test_abs_rmse < best_test_score:
+                #     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                #     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+
+                #     best_test_score = test_abs_rmse
+                #     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
+                # else:
+
+                sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
                 trainer.save_numpy(save_file)
 

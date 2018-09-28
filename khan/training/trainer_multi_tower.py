@@ -10,7 +10,7 @@ from tensorflow.contrib.opt import NadamOptimizer
 
 import khan
 from khan.utils.helpers import ed_harder_rmse
-from khan.model.nn import MoleculeNN, mnn_staging
+from khan.model.nn import MoleculeNN
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from khan.data.dataset import RawDataset
 from khan.model import activations
@@ -314,7 +314,7 @@ class TrainerMultiTower():
         self.non_trainable_variables = []
 
         with tf.device('/cpu:0'):
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-3), trainable=False)
             self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -333,15 +333,19 @@ class TrainerMultiTower():
             self.tower_grads = [] # average is order invariant
             self.tower_force_grads = [] # yell at yutong for naming this
             self.tower_preds = []
+            self.tower_pred_uncertainties = []
             self.tower_bids = []
             self.tower_l2s = []
             self.tower_mos = []
             self.tower_coord_grads = []
             self.tower_features = []
+            self.tower_norms = []
             self.all_models = []
             self.tower_exp_loss = []
             self.tower_force_rmses = []
+            # self.tower_log_laplacians = []
             self.parameters = []
+            self.tower_feat_grads = []
 
             # parameters within a tower are shared.
             with tf.variable_scope(tf.get_variable_scope()):
@@ -393,8 +397,6 @@ class TrainerMultiTower():
                                 f2 = tf.reshape(f2, (-1, feat_size))
                                 f3 = tf.reshape(f3, (-1, feat_size))
 
-                            # print(f0.shape, f1.shape, f2.shape, f3.shape)
-
                             self.tower_features.append(tf.gather(
                                 tf.concat([f0, f1, f2, f3], axis=0),
                                 gather_idxs
@@ -416,7 +418,13 @@ class TrainerMultiTower():
                             self.all_models.append(tower_model_near)
                             tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
 
+                            # sum of softplus is still guaranteed to strictly greater than 0.
+                            tower_near_uncertainty = tf.segment_mean(tower_model_near.atom_uncertainties, m_deq)
+                            # uncertainty
+                            # layer_sizes[-1] += 1
+
                             if fit_charges:
+                                assert 0
                                 tower_model_charges = MoleculeNN(
                                     type_map=["H", "C", "N", "O"],
                                     atom_type_features=[f0, f1, f2, f3],
@@ -454,26 +462,32 @@ class TrainerMultiTower():
                             tf.get_variable_scope().reuse_variables()
 
                             self.tower_preds.append(tower_pred)
-                            tower_l2 = tf.squared_difference(tower_pred, labels)
+                            self.tower_pred_uncertainties.append(tower_near_uncertainty)
 
+                            tower_l2 = tf.squared_difference(tower_pred, labels)
                             self.tower_l2s.append(tower_l2)
                             tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
                             tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
+
                             self.tower_exp_loss.append(tower_exp_loss)
+                            tower_log_laplacian = tf.reduce_mean(tf.abs(tower_pred - labels)/tower_near_uncertainty) + \
+                                tf.reduce_mean(tf.log(tower_near_uncertainty))
+
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
+
+                            # tower_grad = self.optimizer.compute_gradients(tower_log_laplacian)
                             self.tower_grads.append(tower_grad)
 
                             p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
-
                             self.tower_coord_grads.append([p_dx, p_dy, p_dz])
-
+    
                             # forces are the negative of the gradient
                             f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
 
                             # optionally fit to the forces
-                            dx_l2 = tf.pow(f_dx - dx_deq, 2)
-                            dy_l2 = tf.pow(f_dy - dy_deq, 2)
-                            dz_l2 = tf.pow(f_dz - dz_deq, 2)
+                            dx_l2 = tf.pow(tf.expand_dims(f_dx, -1) - dx_deq, 2)
+                            dy_l2 = tf.pow(tf.expand_dims(f_dy, -1) - dy_deq, 2)
+                            dz_l2 = tf.pow(tf.expand_dims(f_dz, -1) - dz_deq, 2)
                             dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
                             dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
                             dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
@@ -487,14 +501,14 @@ class TrainerMultiTower():
 
             def tower_grads(grads):
                 # (jminuse+ytz: hard disabled for now)
-                use_trust_radius = False
-                if not use_trust_radius:
-                    apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
-                else:
-                    grads, vs = zip(*average_gradients(grads))
-                    trust_radius = 1e-4
-                    grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
-                    apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
+                # use_trust_radius = False
+                # if not use_trust_radius:
+                apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
+                # else:
+                #     grads, vs = zip(*average_gradients(grads))
+                #     trust_radius = 1e-4
+                #     grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
+                #     apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
                 variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
                 variables_averages_op = variable_averages.apply(tf.trainable_variables())
                 return tf.group(apply_gradient_op, variables_averages_op)
@@ -674,12 +688,32 @@ class TrainerMultiTower():
         for (grad, mo, tids) in results:
             bidxs = np.argsort(tids)
             sorted_grads = np.take(grad, bidxs, axis=0)
+
+            if np.any(np.isnan(grad)):
+                print("MAJOR GRAD DEBUG")
+                assert 0
+
             sorted_mos = np.take(mo, bidxs, axis=0)
 
             for (mo, grad_all) in zip(sorted_mos, sorted_grads):
                 # mo is an exclusive prefix sum so the first element is zero
                 mo = mo[1:]
                 grad_x, grad_y, grad_z = grad_all
+                if np.any(np.isnan(grad_x)):
+                    print("FATAL NAN FOUND IN X")
+                    print(grad_x)
+                    assert 0
+
+                if np.any(np.isnan(grad_y)):
+                    print("FATAL NAN FOUND IN Y")
+                    print(grad_y)
+                    assert 0
+
+                if np.any(np.isnan(grad_z)):
+                    print("FATAL NAN FOUND IN Z")
+                    print(grad_z)
+                    assert 0
+
                 grad_xs = np.split(grad_x, mo)
                 grad_ys = np.split(grad_y, mo)
                 grad_zs = np.split(grad_z, mo)
@@ -744,7 +778,54 @@ class TrainerMultiTower():
             Returns a list of predicted [y0, y1, y2...] in the same order as the dataset Xs [x0, x1, x2...]
 
         """
-        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_preds, self.tower_bids], batch_size=batch_size)
+        results = self.feed_dataset(
+            dataset,
+            shuffle=False,
+            target_ops=[self.tower_preds, self.tower_bids],
+            batch_size=batch_size
+        )
+
+        # ordered_ys = []
+        # for (ys, ids) in results:
+        #     # sorted_ys = np.take(ys, np.argsort(ids), axis=0)
+        #     ordered_ys.extend(ys)
+        # for r in ordered_ys:
+        #     print(r.shape)
+        # all_ys = np.concatenate(ordered_ys)
+        # return all_ys
+
+
+        # todo: fix
+        ordered_ys = []
+        for (ys, ids) in results:
+            sorted_ys = np.take(ys, np.argsort(ids), axis=0)
+            ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
+        return ordered_ys
+
+    def predict_uncertainties(self, dataset, batch_size=2048):
+        """
+        Infer y-values given a dataset.
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset from which we predict from.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        list of floats
+            Returns a list of predicted [y0, y1, y2...] in the same order as the dataset Xs [x0, x1, x2...]
+
+        """
+        results = self.feed_dataset(
+            dataset,
+            shuffle=False,
+            target_ops=[self.tower_pred_uncertainties, self.tower_bids],
+            batch_size=batch_size
+        )
         ordered_ys = []
         for (ys, ids) in results:
             sorted_ys = np.take(ys, np.argsort(ids), axis=0)
@@ -863,6 +944,7 @@ class TrainerMultiTower():
                         feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
                         feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
 
+                    # print("feeding non-remainder")
                     self.sess.run(self.put_op, feed_dict=feed_dict)
                     g_b_idx += 1
 
@@ -887,6 +969,7 @@ class TrainerMultiTower():
                         feed_dict[self.force_enq_y] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
                         feed_dict[self.force_enq_z] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
 
+                        # print("feeding remainder")
                         self.sess.run(self.put_op, feed_dict=feed_dict)
                         b_idx += 1
 
