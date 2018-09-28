@@ -16,7 +16,7 @@ import tensorflow as tf
 #tf.enable_eager_execution() # TODO: switch to graph once speed is needed
 
 BOHR_PER_ANGSTROM = 0.52917721092
-kT = 0.6 # kcal/mol
+kT = 0.001 # in Hartree
 
 
 def load_NN_models(filenames, sessions):
@@ -58,7 +58,7 @@ def model_E_and_grad(xyz, elements, model):
     natoms, ndim = gradient.shape
     gradient = gradient.reshape(natoms*ndim)
     gradient *= BOHR_PER_ANGSTROM
-    return energy, gradient
+    return energy/kT, gradient/kT # return E in units of kT, gradient in units of kT/Angstrom
 
 
 def opt_E_func(x_flat, elements, model):
@@ -77,9 +77,9 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     dEdx, dEdy, dEdz = [], [], []
     for min_E, model in zip(min_Es, models):
         E, grad = model_E_and_grad(xyz, elements, model)
-        rel_E = (E - min_E) / kT
+        rel_E = (E - min_E)
         Es.append(rel_E)
-        dEdx.append(grad / kT)
+        dEdx.append(grad)
     Es = np.array(Es)
     exp_Es = np.exp(-Es)
     P = np.mean(exp_Es)
@@ -97,9 +97,9 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     dEdx, dEdy, dEdz = [], [], []
     for min_E, model in zip(min_Es, models):
         E, grad = model_E_and_grad(xyz, elements, model)
-        rel_E = (E - min_E) / kT
+        rel_E = (E - min_E)
         Es.append(rel_E)
-        dEdx.append(grad / kT)
+        dEdx.append(grad)
     Es = np.array(Es)
     exp_Es = np.exp(-Es)
     P = np.mean(exp_Es)
@@ -160,8 +160,9 @@ def run_opt(xyz, models):
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
     xyz = np.reshape(x_final, (-1, 3))
+    element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
     for el, xx in zip(elements, xyz):
-        print(el, xx)
+        print(element_names[el], '%f %f %f' % tuple(xx))
     
     # for testing gradients
     print_gradient_per_atom = False
@@ -177,9 +178,11 @@ def run_opt(xyz, models):
 def test_nn_opt():
     # Load NN models from existing files
     # Todo: store layer sizes and activations in file too
+    global kT
     xyz_filename = sys.argv[1]
     with open(xyz_filename) as xyz_file:
         test_xyz = [ [float(s) for s in line.split()] for line in list(xyz_file)[2:] ]
+    kT = float(sys.argv[2])
     #test_xyz = [ [8, 0.0, 0.0, 0.0], [1, 1.0, 0.0, 0.0], [1, 0.0, 1.0, 0.0] ]
     test_xyz = np.array(test_xyz)
     model_filenames = ['sep28_%d/save/best.npz' % i for i in [1,2,3]]
