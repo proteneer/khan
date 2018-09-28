@@ -35,7 +35,7 @@ def load_NN_models(filenames, sess):
                 activation_fn=activation_fn,
                 fit_charges=False,
             )
-        trainer.load_numpy(filename, strict=False, scope="model%d/" % n)
+        trainer.load_numpy(filename, strict=False, ignore="model%d/" % n)
         models.append(trainer)
     return models
 
@@ -170,7 +170,7 @@ def test_nn_opt():
     test_xyz = np.array(test_xyz)
     model_filenames = ['/home/jacobson/software/gdb8_committee/committee-%d.scr/save_file.npz' % i for i in [1,2,3,5]]  # note, model 4 not ready yet
     # load NN
-    lib_path = os.path.abspath('/home/jacobson/software/khan/gpu_featurizer/ani.so')
+    lib_path = os.path.abspath('../gpu_featurizer/ani.so')
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:

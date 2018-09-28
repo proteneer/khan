@@ -314,7 +314,7 @@ class TrainerMultiTower():
         self.non_trainable_variables = []
 
         with tf.device('/cpu:0'):
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-3), trainable=False)
+            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
             self.optimizer = NadamOptimizer(
                     learning_rate=self.learning_rate,
                     beta1=0.9,
@@ -1022,17 +1022,17 @@ class TrainerMultiTower():
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
 
-                for W in self._weight_matrices():
-                    w_matrix = self.sess.run(W)
-                    if W.name in old_weights:
-                        dw = np.sum( (w_matrix - old_weights[W.name])**2 / w_matrix.size )**0.5 # rmse between old weights and new
-                        dw /= learning_rate # divide by learning rate
-                        dw /= rd_train.num_batches(batch_size) # divide by number of gradient steps taken to get average rms change per step
-                        if '_l1:0' in W.name: # first layer, print name
-                            print(W.name, end=' ')
-                        print('%.2g' % dw, end=' ')
-                    old_weights[W.name] = w_matrix
-                print('')
+                #for W in self._weight_matrices():
+                #    w_matrix = self.sess.run(W)
+                #    if W.name in old_weights:
+                #        dw = np.sum( (w_matrix - old_weights[W.name])**2 / w_matrix.size )**0.5 # rmse between old weights and new
+                #        dw /= learning_rate # divide by learning rate
+                #        dw /= rd_train.num_batches(batch_size) # divide by number of gradient steps taken to get average rms change per step
+                #        if '_l1:0' in W.name: # first layer, print name
+                #            print(W.name, end=' ')
+                #        print('%.2g' % dw, end=' ')
+                #    old_weights[W.name] = w_matrix
+                #print('')
 
                 local_epoch_count = train_results[0][2]
                 test_abs_rmse_time = time.time()
@@ -1047,12 +1047,12 @@ class TrainerMultiTower():
                 test_rmses.append( test_abs_rmse )
                 # dynamic learning rate - let lr find its own best value based on trend of train rmse
                 # shouldn't look at test or especially validation error, that would be cheating and lead to overfitting
-                if global_epoch>=3 and global_epoch<=50:
+                if len(train_rmses) >= 3 and global_epoch<=50:
                     # if train error is dropping TOO smoothly, lr is probably too low
                     train_rmse_changes = [ train_rmses[-ii-1]-train_rmses[-ii-2] for ii in range(3)]
                     if all( [t<0.0 for t in train_rmse_changes] ): # train rmse has dropped for last N epochs
                         self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 1.5)) )
-                if global_epoch >= 1:
+                if len(train_rmses) >=2 :
                     # reduce lr right away if training error rises fast - indicates numerical instability
                     train_rmse_ratio = train_rmses[-1]/train_rmses[-2]
                     if train_rmse_ratio > 1.5: # train rmse has risen by more than 50% in one step
@@ -1065,7 +1065,7 @@ class TrainerMultiTower():
                 # Save model if it has the best validation set score
 
                 if test_abs_rmse < best_test_score:
-                    self.save_best_params()
+                    self.save_numpy(save_dir+'/best.npz')
                     best_test_score = test_abs_rmse
                     self.sess.run([self.incr_global_epoch_count, self.reset_local_epoch_count])
                 else:
