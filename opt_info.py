@@ -24,7 +24,7 @@ def load_NN_models(filenames, sess):
     for n, filename in enumerate(filenames):
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
         #layers = (128, 128, 64, 1)
-        layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
+        layers = tuple([256]*4 + [1])
         activation_fn = activations.get_fn_by_name('celu') # TODO: use waterslide
         with tf.variable_scope("model%d" % n): # each trainer needs its own scope
             trainer = TrainerMultiTower(
@@ -168,8 +168,8 @@ def test_nn_opt():
     # Todo: store layer sizes and activations in file too
     test_xyz = [ [8, 0.0, 0.0, 0.0], [1, 1.0, 0.0, 0.0], [1, 0.0, 1.0, 0.0] ]
     test_xyz = np.array(test_xyz)
-    model_filenames = ['/home/jacobson/software/gdb8_committee/committee-%d.scr/save_file.npz' % i for i in [1,2,3,5]]  # note, model 4 not ready yet
-    # load NN
+    model_filenames = ['sep27_0/save/best.npz', 'sep28_0/save/best.npz']
+    # load models
     lib_path = os.path.abspath('../gpu_featurizer/ani.so')
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)

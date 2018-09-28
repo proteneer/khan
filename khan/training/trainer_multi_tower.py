@@ -578,7 +578,9 @@ class TrainerMultiTower():
         for var in tf.global_variables():
             k = var.name
             tfo = self.sess.graph.get_tensor_by_name(k)
-            npa = objs[k.replace(ignore,'')]
+            k = k.replace(ignore, '')
+            #if k not in objs: continue
+            npa = objs[k]
             if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
                 msg = "Cannot deserialize " + str(tfo.dtype.as_numpy_dtype) + " into " + str(npa.dtype)
                 msg += ". You may want to set strict=False."
@@ -1019,6 +1021,7 @@ class TrainerMultiTower():
                         fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5))) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
+                    train_rmses.append( train_abs_rmse )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
 
@@ -1043,16 +1046,15 @@ class TrainerMultiTower():
                 print(save_dir, end=' ')
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), 'batch_size', batch_size, '| train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
-                train_rmses.append( train_abs_rmse )
                 test_rmses.append( test_abs_rmse )
                 # dynamic learning rate - let lr find its own best value based on trend of train rmse
                 # shouldn't look at test or especially validation error, that would be cheating and lead to overfitting
-                if len(train_rmses) >= 3 and global_epoch<=50:
+                if len(train_rmses) > 3 and global_epoch<=50:
                     # if train error is dropping TOO smoothly, lr is probably too low
                     train_rmse_changes = [ train_rmses[-ii-1]-train_rmses[-ii-2] for ii in range(3)]
                     if all( [t<0.0 for t in train_rmse_changes] ): # train rmse has dropped for last N epochs
                         self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 1.5)) )
-                if len(train_rmses) >=2 :
+                if len(train_rmses) > 1 :
                     # reduce lr right away if training error rises fast - indicates numerical instability
                     train_rmse_ratio = train_rmses[-1]/train_rmses[-2]
                     if train_rmse_ratio > 1.5: # train rmse has risen by more than 50% in one step
