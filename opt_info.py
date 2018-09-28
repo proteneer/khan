@@ -26,7 +26,7 @@ def load_NN_models(filenames, sess):
         #layers = (128, 128, 64, 1)
         layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
         activation_fn = activations.get_fn_by_name('celu') # TODO: use waterslide
-        with tf.variable_scope("model%d" % n):
+        with tf.variable_scope("model%d" % n): # each trainer needs its own scope
             trainer = TrainerMultiTower(
                 sess,
                 towers=towers,
@@ -35,7 +35,7 @@ def load_NN_models(filenames, sess):
                 activation_fn=activation_fn,
                 fit_charges=False,
             )
-        trainer.load_numpy(filename, strict=False)
+        trainer.load_numpy(filename, strict=False, scope="model%d/" % n)
         models.append(trainer)
     return models
 
@@ -44,7 +44,7 @@ def model_E_and_grad(xyz, elements, model):
     # xyz and elements must be merged into [element, x, y, z]
     # model must be a Trainer object
     nn_atom_types = [data_utils.atomic_number_to_atom_id(elem) for elem in elements]
-    xyz = np.stack(nn_atom_types, xyz, axis=-1)
+    xyz = [[i]+xx for i, xx in zip(nn_atom_types, xyz)]
     rd = RawDataset([xyz], [0.0])
     energy = float(model.predict(rd)[0])
     self_interaction = np.sum(data_utils.selfIxnNrgWB97X_631gdp[t] for t in nn_atom_types)

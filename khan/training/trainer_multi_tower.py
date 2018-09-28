@@ -542,7 +542,7 @@ class TrainerMultiTower():
             save_objs[var.name] = val
         np.savez(npz_file, **save_objs)
 
-    def load_numpy(self, npz_file, strict=True):
+    def load_numpy(self, npz_file, strict=True, ignore=''):
         """
         Load a numpy checkpoint file.
 
@@ -560,14 +560,16 @@ class TrainerMultiTower():
         """
         objs = np.load(npz_file, allow_pickle=False)
         assign_ops = []
-        for k in objs.keys():
+        #for k in objs.keys():
+        for var in tf.global_variables():
+            k = var.name
             tfo = self.sess.graph.get_tensor_by_name(k)
-            npa = objs[k]
+            npa = objs[k.replace(ignore,'')]
             if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
                 msg = "Cannot deserialize " + str(tfo.dtype.as_numpy_dtype) + " into " + str(npa.dtype)
                 msg += ". You may want to set strict=False."
                 raise TypeError(msg)
-            assign_ops.append(tf.assign(tfo, objs[k].astype(tfo.dtype.as_numpy_dtype)))
+            assign_ops.append(tf.assign(tfo, npa.astype(tfo.dtype.as_numpy_dtype)))
         self.sess.run(assign_ops)
 
     def save(self, save_dir):
@@ -930,8 +932,8 @@ class TrainerMultiTower():
                         shuffle=True,
                         target_ops=train_ops,
                         batch_size=batch_size,
-                        before_hooks=self.max_norm_ops),
-                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
+                        before_hooks=self.max_norm_ops,
+                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5))) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                 global_epoch = train_results[0][0]
