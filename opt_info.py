@@ -3,6 +3,7 @@ Optimizer for molecular geometries in terms of "expected information gain"
 """
 
 import os
+import sys
 import shutil
 import numpy as np
 import scipy.sparse.linalg
@@ -12,21 +13,24 @@ from khan.data.dataset import RawDataset
 from khan.model import activations
 import data_utils
 import tensorflow as tf
+#tf.enable_eager_execution() # TODO: switch to graph once speed is needed
 
 BOHR_PER_ANGSTROM = 0.52917721092
-kT = 10.0 # kcal/mol
+kT = 0.6 # kcal/mol
 
 
-def load_NN_models(filenames, sess):
+def load_NN_models(filenames, sessions):
     # files are expected to be in npz format
     # sess should be an initialized tensorflow session
     models = []
     for n, filename in enumerate(filenames):
+        sess = sessions[n]
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
         #layers = (128, 128, 64, 1)
         layers = tuple([256]*4 + [1])
-        activation_fn = activations.get_fn_by_name('celu') # TODO: use waterslide
+        activation_fn = activations.get_fn_by_name('waterslide')
         with tf.variable_scope("model%d" % n): # each trainer needs its own scope
+        #if True:
             trainer = TrainerMultiTower(
                 sess,
                 towers=towers,
@@ -35,7 +39,7 @@ def load_NN_models(filenames, sess):
                 activation_fn=activation_fn,
                 fit_charges=False,
             )
-        trainer.load_numpy(filename, strict=False, ignore="model%d/" % n)
+            trainer.load_numpy(filename, strict=False)#, ignore="model%d/" % n)
         models.append(trainer)
     return models
 
@@ -44,7 +48,8 @@ def model_E_and_grad(xyz, elements, model):
     # xyz and elements must be merged into [element, x, y, z]
     # model must be a Trainer object
     nn_atom_types = [data_utils.atomic_number_to_atom_id(elem) for elem in elements]
-    xyz = [[i]+xx for i, xx in zip(nn_atom_types, xyz)]
+    xyz = [[i]+list(xx) for i, xx in zip(nn_atom_types, xyz)]
+    #print('in model_E_and_grad, xyz =', xyz)
     rd = RawDataset([xyz], [0.0])
     energy = float(model.predict(rd)[0])
     self_interaction = np.sum(data_utils.selfIxnNrgWB97X_631gdp[t] for t in nn_atom_types)
@@ -59,6 +64,7 @@ def model_E_and_grad(xyz, elements, model):
 def opt_E_func(x_flat, elements, model):
     # basic energy function to optimize, for finding min_E
     xyz = np.reshape(x_flat, (-1, 3))
+    #print('in opt_E_func, xyz =', xyz, 'elements =', elements)
     E, grad = model_E_and_grad(xyz, elements, model)
     return E#, grad
 
@@ -69,7 +75,7 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     xyz = np.reshape(x_flat, (-1, 3))
     Es = []
     dEdx, dEdy, dEdz = [], [], []
-    for min_E, model_params in zip(min_Es, models):
+    for min_E, model in zip(min_Es, models):
         E, grad = model_E_and_grad(xyz, elements, model)
         rel_E = (E - min_E) / kT
         Es.append(rel_E)
@@ -82,15 +88,15 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     # grad not implemented yet
     
     
-def opt_info_func(x_flat, min_Es, models, calc_grad=False):
+def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     # TODO: add "similarity to points already guessed" as a metric here
     # The use of a similarity metric implies we have a prior about which
     # points are likely to be the same as each other
     xyz = np.reshape(x_flat, (-1, 3))
     Es = []
     dEdx, dEdy, dEdz = [], [], []
-    for min_E, model_params in zip(min_Es, models):
-        E, grad = model_E_and_grad(xyz, (mmffld_handle, st, model_params))
+    for min_E, model in zip(min_Es, models):
+        E, grad = model_E_and_grad(xyz, elements, model)
         rel_E = (E - min_E) / kT
         Es.append(rel_E)
         dEdx.append(grad / kT)
@@ -101,7 +107,10 @@ def opt_info_func(x_flat, min_Es, models, calc_grad=False):
     # If Laplacian, 2*(mean absolute difference from median) would be used
     # to approximate the spread of energies, instead of stddev
     # which would be more robust but harder to find the gradient of
-    info = np.log(np.std(Es))
+    if False:
+        info = np.log(np.std(Es)) # Gaussian assumption
+    else:
+        info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
     uniqueness = 1.0
     expected_info = P * info * uniqueness
     if not calc_grad:
@@ -132,19 +141,21 @@ def run_opt(xyz, models):
     min_Es = []
     for model in models:
         # optimize energy for this model
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e1, approx_grad=True)
+        print('Trying initial energy optimization for model', model)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, approx_grad=True)
         min_x, min_E, success = result
         min_Es.append(min_E)
-        print('model', model_params, '=> min_E', min_E)
+        print('model min_E =', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e1, approx_grad=True)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e3, approx_grad=True)
     x0, P0, success = result
     print('P0 =', -P0)
+    print('Max P geometry:', x0)
     # run scipy optimize
-    print( 'Initial expected info =', -opt_info_func(x0, False))
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e1, approx_grad=True)
+    print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, x0, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True)
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
@@ -166,16 +177,20 @@ def run_opt(xyz, models):
 def test_nn_opt():
     # Load NN models from existing files
     # Todo: store layer sizes and activations in file too
-    test_xyz = [ [8, 0.0, 0.0, 0.0], [1, 1.0, 0.0, 0.0], [1, 0.0, 1.0, 0.0] ]
+    xyz_filename = sys.argv[1]
+    with open(xyz_filename) as xyz_file:
+        test_xyz = [ [float(s) for s in line.split()] for line in list(xyz_file)[2:] ]
+    #test_xyz = [ [8, 0.0, 0.0, 0.0], [1, 1.0, 0.0, 0.0], [1, 0.0, 1.0, 0.0] ]
     test_xyz = np.array(test_xyz)
-    model_filenames = ['sep27_0/save/best.npz', 'sep28_0/save/best.npz']
+    model_filenames = ['sep28_%d/save/best.npz' % i for i in [1,2,3]]
     # load models
     lib_path = os.path.abspath('../gpu_featurizer/ani.so')
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)
-    with tf.Session(config=config) as sess:
-        models = load_NN_models(model_filenames, sess)
-        run_opt(test_xyz, models)
+    #with tf.Session(config=config) as sess
+    sessions = [ tf.Session(config=config) for name in model_filenames ]
+    models = load_NN_models(model_filenames, sessions)
+    run_opt(test_xyz, models)
 
 
 test_nn_opt()

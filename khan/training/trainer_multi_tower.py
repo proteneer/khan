@@ -574,12 +574,19 @@ class TrainerMultiTower():
         """
         objs = np.load(npz_file, allow_pickle=False)
         assign_ops = []
-        #for k in objs.keys():
-        for var in tf.global_variables():
-            k = var.name
-            tfo = self.sess.graph.get_tensor_by_name(k)
-            k = k.replace(ignore, '')
-            #if k not in objs: continue
+        for k in objs.keys():
+        #for var in tf.global_variables():
+            #k = var.name
+            #if not k.startswith(ignore): continue
+            try:
+                tfo = self.sess.graph.get_tensor_by_name( tf.get_variable_scope().name + '/' + k)
+            except:
+                print(k, 'lookup failed')
+                continue
+            print(k, 'found')
+            #k = k.replace(ignore, '')
+            if k not in objs:
+                raise IndexError(k, ignore, 'not in objs')
             npa = objs[k]
             if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
                 msg = "Cannot deserialize " + str(tfo.dtype.as_numpy_dtype) + " into " + str(npa.dtype)
@@ -977,6 +984,7 @@ class TrainerMultiTower():
 
             except Exception as e:
                 print("QueueError:", e)
+                exit()
 
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)
