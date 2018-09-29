@@ -100,9 +100,8 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     xyzs = np.reshape(x_flat, (n_results, len(elements), 3))
     expected_info_gain_per_point = []
     grad_norm_per_point = []
-    for n in range(n_results):
+    for n, xyz in enumerate(xyzs):
         Es, dEdx = [], []
-        xyz = xyzs[n]
         for min_E, model in zip(min_Es, models):
             E, grad = model_E_and_grad(xyz, elements, model)
             rel_E = (E - min_E)
@@ -132,7 +131,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         return -sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
     
 
-def run_opt(xyz, models, n_results=2):
+def run_opt(xyz, models, n_results=1):
     print(xyz)
     # xyz should be in the form [ [element x y z], ... ]
     elements = [row[0] for row in xyz]
