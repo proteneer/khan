@@ -52,8 +52,7 @@ def model_E_and_grad(xyz, elements, model):
     self_interaction = np.sum(data_utils.selfIxnNrgWB97X_631gdp[t] for t in nn_atom_types)
     energy += self_interaction
     gradient = list(model.coordinate_gradients(rd))[0]
-    natoms, ndim = gradient.shape
-    gradient = gradient.reshape(natoms*ndim)
+    gradient = gradient.reshape(gradient.size)
     gradient *= BOHR_PER_ANGSTROM
     return energy/kT, gradient/kT # return E in units of kT, gradient in units of kT/Angstrom
 
@@ -63,7 +62,7 @@ def opt_E_func(x_flat, elements, model):
     xyz = np.reshape(x_flat, (-1, 3))
     #print('in opt_E_func, xyz =', xyz, 'elements =', elements)
     E, grad = model_E_and_grad(xyz, elements, model)
-    return E#, grad
+    return E, grad
 
 
 def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
@@ -147,7 +146,7 @@ def run_opt(xyz, models, n_results=1):
     for model in models:
         # optimize energy for this model
         print('Trying initial energy optimization for model', model)
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-5*kT)#, approx_grad=True, epsilon=1e-5)
         min_x, min_E, success = result
         min_Es.append(min_E)
         print('model min_E =', min_E)
