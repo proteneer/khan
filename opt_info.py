@@ -125,7 +125,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
            xyz2 = xyzs[n2*len(elements) : (n2+1)*len(elements)]
            coul_mat1 = coul_mat(xyz1)
            coul_mat2 = coul_mat(xyz2)
-           rms_diff = np.sqrt( np.sum((dist_mat1 - dist_mat2)**2) / dist_mat1.size )
+           rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / dist_mat1.size )
            scale = grad_norm_per_point[n1] # bigger grad => need denser info
            similarity_sum += np.exp( -rms_diff * scale ) / n_results
         # note, max value of similarity_sum == 1
