@@ -13,7 +13,6 @@ from khan.data.dataset import RawDataset
 from khan.model import activations
 import data_utils
 import tensorflow as tf
-#tf.enable_eager_execution() # TODO: switch to graph once speed is needed
 
 BOHR_PER_ANGSTROM = 0.52917721092
 kT = 0.001 # in Hartree
@@ -26,11 +25,9 @@ def load_NN_models(filenames, sessions):
     for n, filename in enumerate(filenames):
         sess = sessions[n]
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
-        #layers = (128, 128, 64, 1)
         layers = tuple([256]*4 + [1])
         activation_fn = activations.get_fn_by_name('waterslide')
         with tf.variable_scope("model%d" % n): # each trainer needs its own scope
-        #if True:
             trainer = TrainerMultiTower(
                 sess,
                 towers=towers,
@@ -39,7 +36,7 @@ def load_NN_models(filenames, sessions):
                 activation_fn=activation_fn,
                 fit_charges=False,
             )
-            trainer.load_numpy(filename, strict=False)#, ignore="model%d/" % n)
+            trainer.load_numpy(filename, strict=False)
         models.append(trainer)
     return models
 
@@ -88,6 +85,15 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     # grad not implemented yet
     
     
+def coul_mat(xyz):
+    # xyz is n_atoms x 3
+    mat = np.zeros(len(xyz), len(xyz))
+    for i, xi in enumerate(xyz):
+        for j, xj in enumerate(xyz):
+            if i == j: continue
+            mat[i][j] = 1 / np.linalg.norm(xi-xj)
+    return mat
+    
 def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     # TODO: add "similarity to points already guessed" as a metric here
     # The use of a similarity metric implies we have a prior about which
@@ -119,10 +125,10 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
            xyz2 = xyzs[n2*len(elements) : (n2+1)*len(elements)]
            coul_mat1 = coul_mat(xyz1)
            coul_mat2 = coul_mat(xyz2)
-           difference = np.sum((dist_mat1 - dist_mat2)**2)
-           curvature = 1.0 # wild guess
-           similarity_sum += np.exp( -difference * curvature / kT )
-        # note, max of n_results is n_results
+           rms_diff = np.sqrt( np.sum((dist_mat1 - dist_mat2)**2) / dist_mat1.size )
+           length_scale = 1.0 # wild guess
+           similarity_sum += np.exp( -rms_diff * length_scale )
+        # note, max of similarity_sum is n_results
         uniqueness = 1.0 - similarity_sum / n_results
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
