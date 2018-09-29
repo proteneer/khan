@@ -121,9 +121,8 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         similarity_sum = 0.0
         for n2, xyz2 in enumerate(xyzs):
            if n1==n2: continue
-           coul_mat1 = coul_mat(xyz1)
-           coul_mat2 = coul_mat(xyz2)
-           rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / dist_mat1.size )
+           coul_mat1, coul_mat2 = coul_mat(xyz1), coul_mat(xyz2)
+           rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / coul_mat1.size )
            scale = grad_norm_per_point[n1] # bigger grad => need denser info
            similarity_sum += np.exp( -rms_diff * scale ) / n_results
         # note, max value of similarity_sum == 1
