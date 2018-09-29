@@ -132,7 +132,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         return -sum(expected_info_gain_per_point) # - because we want to maximize, not minimize
     
 
-def run_opt(xyz, models, n_results=1):
+def run_opt(xyz, models, n_results=2):
     print(xyz)
     # xyz should be in the form [ [element x y z], ... ]
     elements = [row[0] for row in xyz]
@@ -160,13 +160,13 @@ def run_opt(xyz, models, n_results=1):
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
     xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
     xyzs = np.reshape(x_final, (n_results, len(elements), 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
-    for n in n_results:
+    for n in range(n_results):
         print(len(elements))
         print('Result', n)
         for el, xx in zip(elements, xyzs[n]):
