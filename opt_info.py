@@ -81,7 +81,8 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=True):
     if not calc_grad:
         return -P
     else:
-        return -P, np.dot(exp_Es, dEdx)
+        grad_negative_P = np.dot(exp_Es, dEdx)
+        return -P, grad_negative_P  # negative because we want to maximize, not minimize
     
     
 def coul_mat(xyz):
@@ -98,6 +99,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     n_results = len(x_flat) // (len(elements)*3)  # how many distinct xyz systems we have
     xyzs = np.reshape(x_flat, (n_results, len(elements), 3))
     expected_info_gain_per_point = []
+    grad_norm_per_point = []
     for n in range(n_results):
         Es, dEdx = [], []
         xyz = xyzs[n]
@@ -114,6 +116,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         else:
             info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
         expected_info_gain_per_point.append( P * info )
+        grad_norm_per_point.append(np.mean(np.linalg.norm(dEdx, axis=1)))
     for n1 in range(n_results):
         similarity_sum = 0.0
         for n2 in range(n_results):
@@ -123,13 +126,13 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
            coul_mat1 = coul_mat(xyz1)
            coul_mat2 = coul_mat(xyz2)
            rms_diff = np.sqrt( np.sum((dist_mat1 - dist_mat2)**2) / dist_mat1.size )
-           length_scale = 1.0 # wild guess
-           similarity_sum += np.exp( -rms_diff * length_scale )
-        # note, max of similarity_sum is n_results
-        uniqueness = 1.0 - similarity_sum / n_results
+           scale = grad_norm_per_point[n1] # bigger grad => need denser info
+           similarity_sum += np.exp( -rms_diff * scale ) / n_results
+        # note, max value of similarity_sum == 1
+        uniqueness = 1.0 - similarity_sum
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
-        return -sum(expected_info_gain_per_point) # - because we want to maximize, not minimize
+        return -sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
     
 
 def run_opt(xyz, models, n_results=2):
