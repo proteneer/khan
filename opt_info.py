@@ -65,7 +65,7 @@ def opt_E_func(x_flat, elements, model):
     return E, grad
 
 
-def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
+def opt_P_func(x_flat, elements, min_Es, models, calc_grad=True):
     # more advanced objective function, giving mean probability
     # for initial probability maximization, balancing between models
     xyz = np.reshape(x_flat, (-1, 3))
@@ -80,7 +80,8 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     P = np.mean(exp_Es)
     if not calc_grad:
         return -P
-    # grad not implemented yet
+    else:
+        return -P, np.dot(exp_Es, dEdx)
     
     
 def coul_mat(xyz):
@@ -94,7 +95,7 @@ def coul_mat(xyz):
    
     
 def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
-    n_results = len(x_flat) // len(elements)  # how many distinct xyz systems we have
+    n_results = len(x_flat) // (len(elements)*3)  # how many distinct xyz systems we have
     xyzs = np.reshape(x_flat, (n_results, len(elements), 3))
     expected_info_gain_per_point = []
     for n in range(n_results):
@@ -144,14 +145,14 @@ def run_opt(xyz, models, n_results=1):
     for model in models:
         # optimize energy for this model
         print('Trying initial energy optimization for model', model)
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-5*kT)#, approx_grad=True, epsilon=1e-5)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-6*kT)  # approx_grad=True, epsilon=1e-5)
         min_x, min_E, success = result
         min_Es.append(min_E)
         print('model min_E =', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=0, factr=1e3, approx_grad=True, epsilon=1e-5, pgtol=1e-5*kT)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=1, factr=1e3, pgtol=1e-6*kT)  # approx_grad=True, epsilon=1e-5, 
     x0, P0, success = result
     print('P0 =', -P0)
     print('Max P geometry:', x0)
