@@ -62,10 +62,10 @@ def opt_E_func(x_flat, elements, model):
     xyz = np.reshape(x_flat, (-1, 3))
     #print('in opt_E_func, xyz =', xyz, 'elements =', elements)
     E, grad = model_E_and_grad(xyz, elements, model)
-    return E, grad
+    return E#, grad
 
 
-def opt_P_func(x_flat, elements, min_Es, models, calc_grad=True):
+def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     # more advanced objective function, giving mean probability
     # for initial probability maximization, balancing between models
     xyz = np.reshape(x_flat, (-1, 3))
@@ -110,28 +110,31 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         Es = np.array(Es)
         exp_Es = np.exp(-Es)
         P = np.mean(exp_Es)
+        best_info = 100.0 # arbitrary big number of nats (log units of information)
         if False:
-            info = np.log(np.std(Es)) # Gaussian assumption
+            info = best_info + np.log(np.std(Es)) # Gaussian assumption
         else:
-            info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
+            info = best_info + np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
         expected_info_gain_per_point.append( P * info )
         grad_norm_per_point.append(np.mean(np.linalg.norm(dEdx, axis=1)))
     for n1, xyz1 in enumerate(xyzs):
         similarity_sum = 0.0
-        for n2, xyz2 in enumerate(xyzs[n1+1:]):
-           #if n1==n2: continue
+        for n2, xyz2 in enumerate(xyzs):
+           if n1==n2: continue
            coul_mat1, coul_mat2 = coul_mat(xyz1), coul_mat(xyz2)
            rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / coul_mat1.size )
-           scale = grad_norm_per_point[n1] # bigger grad => need denser info
+           scale = 1e-1 * grad_norm_per_point[n1] # bigger grad => need denser info
+           #print('scale, rms_diff =', scale, rms_diff)
            similarity_sum += np.exp( -rms_diff * scale ) / n_results
         # note, max value of similarity_sum == 1
-        uniqueness = 1.0# - similarity_sum
+        uniqueness = 1.0 - similarity_sum
+        print('P, info, Es =', P, info, Es, uniqueness)
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
         return -sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
     
 
-def run_opt(xyz, models, n_results=1):
+def run_opt(xyz, models, n_results=2):
     print(xyz)
     # xyz should be in the form [ [element x y z], ... ]
     elements = [row[0] for row in xyz]
@@ -144,22 +147,22 @@ def run_opt(xyz, models, n_results=1):
     for model in models:
         # optimize energy for this model
         print('Trying initial energy optimization for model', model)
-        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-6*kT)  # approx_grad=True, epsilon=1e-5)
+        result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-6*kT, approx_grad=True, epsilon=1e-6)
         min_x, min_E, success = result
         min_Es.append(min_E)
         print('model min_E =', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), iprint=1, factr=1e3, pgtol=1e-6*kT)  # approx_grad=True, epsilon=1e-5, 
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=20, iprint=1, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
     x0, P0, success = result
     print('P0 =', -P0)
     print('Max P geometry:', x0)
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
-    xs += np.random.normal(scale=0.1, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-5, pgtol=1e-6*kT)
+    xs += np.random.normal(scale=0.001, size=xs.shape) # randomize starting positions a little
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=100, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
