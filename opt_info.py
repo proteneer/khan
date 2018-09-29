@@ -87,7 +87,7 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=True):
     
 def coul_mat(xyz):
     # xyz is n_atoms x 3
-    mat = np.zeros(len(xyz), len(xyz))
+    mat = np.zeros((len(xyz), len(xyz)))
     for i, xi in enumerate(xyz):
         for j, xj in enumerate(xyz):
             if i == j: continue
