@@ -70,8 +70,7 @@ def opt_P_func(x_flat, elements, min_Es, models, calc_grad=False):
     # more advanced objective function, giving mean probability
     # for initial probability maximization, balancing between models
     xyz = np.reshape(x_flat, (-1, 3))
-    Es = []
-    dEdx, dEdy, dEdz = [], [], []
+    Es, dEdx = [], []
     for min_E, model in zip(min_Es, models):
         E, grad = model_E_and_grad(xyz, elements, model)
         rel_E = (E - min_E)
@@ -102,7 +101,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
     xyzs = np.reshape(x_flat, (-1, 3))
     expected_info_gain_per_point = []
     for n in range(n_results):
-        Es = []
+        Es, dEdx = [], []
         xyz = xyzs[n*len(elements) : (n+1)*len(elements)]
         for min_E, model in zip(min_Es, models):
             E, grad = model_E_and_grad(xyz, elements, model)
