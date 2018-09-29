@@ -91,17 +91,15 @@ def coul_mat(xyz):
             if i == j: continue
             mat[i][j] = 1 / np.linalg.norm(xi-xj)
     return mat
+   
     
 def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
-    # TODO: add "similarity to points already guessed" as a metric here
-    # The use of a similarity metric implies we have a prior about which
-    # points are likely to be the same as each other
-    n_results = len(x_flat) // len(elements)
-    xyzs = np.reshape(x_flat, (-1, 3))
+    n_results = len(x_flat) // len(elements)  # how many distinct xyz systems we have
+    xyzs = np.reshape(x_flat, (n_results, len(elements), 3))
     expected_info_gain_per_point = []
     for n in range(n_results):
         Es, dEdx = [], []
-        xyz = xyzs[n*len(elements) : (n+1)*len(elements)]
+        xyz = xyzs[n]
         for min_E, model in zip(min_Es, models):
             E, grad = model_E_and_grad(xyz, elements, model)
             rel_E = (E - min_E)
@@ -165,25 +163,15 @@ def run_opt(xyz, models, n_results=1):
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
-    xyz = np.reshape(x_final, (-1, 3))
+    xyzs = np.reshape(x_final, (n_results, len(elements), 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
     for n in n_results:
         print(len(elements))
         print('Result', n)
-        for el, xx in zip(elements, xyz[n*len(elements) : (n+1)*len(elements)]):
+        for el, xx in zip(elements, xyzs[n]):
             print(element_names[el], '%f %f %f' % tuple(xx))
-    
-    # for testing gradients
-    print_gradient_per_atom = False
-    if print_gradient_per_atom:
-        analytical_grads = np.reshape(opt_info_func(x0, True)[1], (-1, 3))
-        numerical_grads = np.reshape(success['grad'], (-1, 3))
-        print('Gradient per atom:')
-        print('index    element    grad_analytic    grad_numerical')
-        for i, atom, analytical_grad, numerical_grad in zip(range(len(st.atom)), st.atom, analytical_grads, numerical_grads):
-            print(i+1, atom.element, analytical_grad, numerical_grad)
 
-
+            
 def test_nn_opt():
     # Load NN models from existing files
     # Todo: store layer sizes and activations in file too
