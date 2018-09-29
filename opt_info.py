@@ -126,7 +126,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
            scale = grad_norm_per_point[n1] # bigger grad => need denser info
            similarity_sum += np.exp( -rms_diff * scale ) / n_results
         # note, max value of similarity_sum == 1
-        uniqueness = 1.0 - similarity_sum
+        uniqueness = 1.0# - similarity_sum
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
         return -sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
