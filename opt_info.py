@@ -159,8 +159,8 @@ def run_opt(xyz, models, n_results=2):
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
-    xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
+    xs += np.random.normal(scale=0.1, size=xs.shape) # randomize starting positions a little
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), iprint=1, factr=1e1, approx_grad=True, epsilon=1e-5, pgtol=1e-6*kT)
     x_final, fun_final, success = result
     print('Final expected info =', -fun_final)
     print('Final xyz coords:')
