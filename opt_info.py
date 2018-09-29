@@ -117,12 +117,10 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
             info = np.log( np.sum(np.abs( Es - np.median(Es) ) ) ) # Laplacian assumption
         expected_info_gain_per_point.append( P * info )
         grad_norm_per_point.append(np.mean(np.linalg.norm(dEdx, axis=1)))
-    for n1 in range(n_results):
+    for n1, xyz1 in enumerate(xyzs):
         similarity_sum = 0.0
-        for n2 in range(n_results):
+        for n2, xyz2 in enumerate(xyzs):
            if n1==n2: continue
-           xyz1 = xyzs[n1*len(elements) : (n1+1)*len(elements)]
-           xyz2 = xyzs[n2*len(elements) : (n2+1)*len(elements)]
            coul_mat1 = coul_mat(xyz1)
            coul_mat2 = coul_mat(xyz2)
            rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / dist_mat1.size )
