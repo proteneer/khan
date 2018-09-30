@@ -133,10 +133,10 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
                #print('scale, rms_diff =', scale, rms_diff)
                similarity_sum += np.exp( -rms_diff * scale ) / n_results
            if True:
-               similarity_sum += np.exp( -1e-4 * np.abs( median_E_per_point[n1] - median_E_per_point[n2] ) ) / n_results
+               similarity_sum += np.exp( -np.abs( median_E_per_point[n1] - median_E_per_point[n2] ) ) / n_results
         # note, max value of similarity_sum == 1
         uniqueness = 1.0 - similarity_sum
-        #print('P, info, Es =', P, info, Es, uniqueness)
+        print('P, info, Es =', P, info, Es, uniqueness)
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
         return -np.sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
@@ -162,17 +162,25 @@ def run_opt(xyz, models, n_results=1):
     result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=100, iprint=1, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
     x0, P0, success = result
     print('P0 =', -P0)
-    print('Max P geometry:', zip(elements, np.reshape(x0, (-1, 3))))
+    print('Max P geometry:', '\n'.join([str(s) for s in zip(elements, np.reshape(x0, (-1, 3)))]))
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
     xs += np.random.normal(scale=0.001, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=1e3, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=1e2, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
     x_final, fun_final, success = result
     #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':3000,'disp':True})
     #x_final, fun_final = result.x, result.fun
     print('Final expected info =', -fun_final)
-    print('Final xyz coords:')
+    print('Max P geometry:')
+    xyzs = np.reshape(x0, (1, len(elements), 3))
+    element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
+    for n in range(1):
+        print(len(elements))
+        print('Result', n)
+        for el, xx in zip(elements, xyzs[n]):
+            print(element_names[el], '%f %f %f' % tuple(xx))
+    print('Max info geometry:')
     xyzs = np.reshape(x_final, (n_results, len(elements), 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
     for n in range(n_results):
