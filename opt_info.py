@@ -112,12 +112,14 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
         Es = np.array(Es)
         exp_Es = np.exp(-Es)
         P = np.mean(exp_Es)
-        inherent_variance = 1.0 # in units of (kT)^2
-        best_info = 0.0 # arbitrary number of nats (log units of information)
-        if True:
-            info = best_info + np.log( np.sqrt(np.var(Es, ddof=1) + inherent_variance) ) # Gaussian assumption
-        else:
-            info = best_info + np.log( np.sqrt(inherent_variance + np.sum(np.abs( Es - np.median(Es) ) )**2) ) # Laplacian assumption? Not sure how variances add for Laplacians
+        inherent_variance = (0.001 / kT)**2  # in units of (Hartree/kT)^2
+        ref_variance = (0.0005 / kT)**2  # in units of (kT)^2 - refers to the errors of the QM reference method
+        if True:  # assume model Es are sampled from a Gaussian distribution with a certain mean and variance
+            models_variance = np.var(Es, ddof=1) + inherent_variance
+            # KL divergence between Gaussians with same mean, different variances:
+            info = np.log( np.sqrt(models_variance/ref_variance) ) + (ref_variance/models_variance - 1)/2
+        else: # Laplacian assumption? Not sure how variances add for Laplacians
+            info = np.log( np.sqrt(inherent_variance + np.sum(np.abs( Es - np.median(Es) ) )**2) )
         expected_info_gain_per_point.append( P * info )
         #print('P, info = %.2g %.2g' % (P, info))
         #grad_norm_per_point.append(np.mean(np.linalg.norm(dEdx, axis=1)))
@@ -136,7 +138,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
                similarity_sum += np.exp( -np.abs( median_E_per_point[n1] - median_E_per_point[n2] ) ) / n_results
         # note, max value of similarity_sum == 1
         uniqueness = 1.0 - similarity_sum
-        print('P, info, Es =', P, info, Es, uniqueness)
+        #print('P, info, Es =', P, info, Es, uniqueness)
         expected_info_gain_per_point[n1] *= uniqueness
     if not calc_grad:
         return -np.sum(expected_info_gain_per_point) # negative because we want to maximize, not minimize
@@ -154,22 +156,26 @@ def run_opt(xyz, models, n_results=1):
         print('Trying initial energy optimization for model', model)
         result = scipy.optimize.fmin_l_bfgs_b(opt_E_func, x0, args=(elements, model), iprint=0, factr=1e3, pgtol=1e-6*kT, approx_grad=True, epsilon=1e-6)
         min_x, min_E, success = result
+        #result = scipy.optimize.basinhopping(opt_E_func, x0, minimizer_kwargs={'args':(elements, model), 'method':'Nelder-Mead'}, niter=10, T=1.0, stepsize=1.0, disp=True) # T is in kT units, stepsize in Angstroms
+        #min_x, min_E = result.x, result.fun
         min_Es.append(min_E)
         print('model min_E =', min_E)
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=100, iprint=1, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=50, iprint=1, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
     x0, P0, success = result
     print('P0 =', -P0)
     print('Max P geometry:', '\n'.join([str(s) for s in zip(elements, np.reshape(x0, (-1, 3)))]))
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
-    xs += np.random.normal(scale=0.001, size=xs.shape) # randomize starting positions a little
+    xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
     result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=1e2, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
     x_final, fun_final, success = result
     #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':3000,'disp':True})
+    #x_final, fun_final = result.x, result.fun
+    #result = scipy.optimize.basinhopping(opt_info_func, xs, minimizer_kwargs={'args':(elements, min_Es, models), 'method':'Nelder-Mead'}, niter=5, T=1.0, stepsize=1.0, disp=True) # T is in kT units, stepsize in Angstroms
     #x_final, fun_final = result.x, result.fun
     print('Final expected info =', -fun_final)
     print('Max P geometry:')
