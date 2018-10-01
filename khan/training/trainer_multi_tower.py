@@ -556,7 +556,7 @@ class TrainerMultiTower():
             save_objs[var.name] = val
         np.savez(npz_file, **save_objs)
 
-    def load_numpy(self, npz_file, strict=True, ignore=''):
+    def load_numpy(self, npz_file, strict=True):
         """
         Load a numpy checkpoint file.
 
@@ -575,18 +575,11 @@ class TrainerMultiTower():
         objs = np.load(npz_file, allow_pickle=False)
         assign_ops = []
         for k in objs.keys():
-        #for var in tf.global_variables():
-            #k = var.name
-            #if not k.startswith(ignore): continue
             try:
                 tfo = self.sess.graph.get_tensor_by_name( tf.get_variable_scope().name + '/' + k)
             except:
                 print(k, 'lookup failed')
-                continue
-            print(k, 'found')
-            #k = k.replace(ignore, '')
-            if k not in objs:
-                raise IndexError(k, ignore, 'not in objs')
+                continue  # don't treat failed lookups as fatal, many are not
             npa = objs[k]
             if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
                 msg = "Cannot deserialize " + str(tfo.dtype.as_numpy_dtype) + " into " + str(npa.dtype)
