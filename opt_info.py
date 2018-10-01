@@ -16,7 +16,8 @@ import tensorflow as tf
 
 BOHR_PER_ANGSTROM = 0.52917721092
 kT = 0.001 # in Hartree
-
+NN_LAYERS = tuple([256]*4 + [1])
+NN_ACTIVATION = 'waterslide'
 
 def load_NN_models(filenames, sessions):
     # files are expected to be in npz format
@@ -25,8 +26,8 @@ def load_NN_models(filenames, sessions):
     for n, filename in enumerate(filenames):
         sess = sessions[n]
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
-        layers = tuple([256]*4 + [1])
-        activation_fn = activations.get_fn_by_name('waterslide')
+        layers = NN_LAYERS
+        activation_fn = activations.get_fn_by_name(NN_ACTIVATION)
         with tf.variable_scope("model%d" % n): # each trainer needs its own scope
             trainer = TrainerMultiTower(
                 sess,
@@ -131,7 +132,7 @@ def opt_info_func(x_flat, elements, min_Es, models, calc_grad=False):
            if False:
                coul_mat1, coul_mat2 = coul_mat(xyz1), coul_mat(xyz2)
                rms_diff = np.sqrt( np.sum((coul_mat1 - coul_mat2)**2) / coul_mat1.size )
-               scale = 0.1 * grad_norm_per_point[n1] # bigger grad => need denser info
+               scale = 0.1# * grad_norm_per_point[n1] # bigger grad => need denser info
                #print('scale, rms_diff =', scale, rms_diff)
                similarity_sum += np.exp( -rms_diff * scale ) / n_results
            if True:
@@ -171,9 +172,9 @@ def run_opt(xyz, models, n_results=1):
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
     xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
     xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=1e2, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=50, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
     x_final, fun_final, success = result
-    #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':3000,'disp':True})
+    #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':len(xs)*10,'disp':True})
     #x_final, fun_final = result.x, result.fun
     #result = scipy.optimize.basinhopping(opt_info_func, xs, minimizer_kwargs={'args':(elements, min_Es, models), 'method':'Nelder-Mead'}, niter=5, T=1.0, stepsize=1.0, disp=True) # T is in kT units, stepsize in Angstroms
     #x_final, fun_final = result.x, result.fun
