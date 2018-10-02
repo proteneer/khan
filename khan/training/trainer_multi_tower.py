@@ -212,7 +212,7 @@ class FeaturizationParameters():
         A_eta=6.0,
         A_zeta=8.0,
         R_Rs=(5.0000000e-01,7.5625000e-01,1.0125000e+00,1.2687500e+00,1.5250000e+00,1.7812500e+00,2.0375000e+00,2.2937500e+00,2.5500000e+00,2.8062500e+00,3.0625000e+00,3.3187500e+00,3.5750000e+00,3.8312500e+00,4.0875000e+00,4.3437500e+00),
-        A_thetas=(0.0000000e+00,7.8539816e-01,1.5707963e+00,2.3561945e+00,3.1415927e+00,3.9269908e+00,4.7123890e+00,5.4977871e+00),
+        A_thetas=(0.0000000e+00,7.8539816e-01,1.5707963e+00,2.3561945e+00,3.1415927e+00),
         A_Rs=(5.0000000e-01,1.1500000e+00,1.8000000e+00,2.4500000e+00)):
 
         self.n_types = n_types
@@ -575,10 +575,13 @@ class TrainerMultiTower():
         objs = np.load(npz_file, allow_pickle=False)
         assign_ops = []
         for k in objs.keys():
+            current_scope_name = tf.get_variable_scope().name
+            if current_scope_name:
+                current_scope_name += '/'
             try:
-                tfo = self.sess.graph.get_tensor_by_name( tf.get_variable_scope().name + '/' + k)
+                tfo = self.sess.graph.get_tensor_by_name(current_scope_name + k)
             except:
-                print(k, 'lookup failed')
+                print(k, 'lookup failed', current_scope_name)
                 continue  # don't treat failed lookups as fatal, many are not
             npa = objs[k]
             if tfo.dtype.as_numpy_dtype != npa.dtype and strict is True:
@@ -990,7 +993,7 @@ class TrainerMultiTower():
     # run the actual training
     # (ytz) - this is maintained by jminuse for the sake of convenience for now.
     # This is HOTMERGED - I'd avoid calling this code if possible, it seriously needs refactoring
-    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, min_learning_rate=1e-7, max_global_epoch_count=2000):
+    def train(self, save_dir, rd_train, rd_test, rd_gdb11, eval_names, eval_datasets, eval_groups, batch_size, max_local_epoch_count=25, max_batch_size=1e4, min_learning_rate=1e-7, max_global_epoch_count=5000):
 
         train_ops = [
             self.global_epoch_count,
@@ -1011,7 +1014,8 @@ class TrainerMultiTower():
         # bigger batches as fitting goes on, to make updates less exploratory
         while batch_size < max_batch_size and self.sess.run(self.learning_rate)>=min_learning_rate and global_epoch <= max_global_epoch_count:
             while self.sess.run(self.local_epoch_count) < max_local_epoch_count and global_epoch <= max_global_epoch_count:
-                for step in range(2): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
+                n_steps = 1
+                for step in range(n_steps): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
                     train_step_time = time.time()
                     train_results = list( self.feed_dataset(
                         rd_train,
@@ -1019,45 +1023,35 @@ class TrainerMultiTower():
                         target_ops=train_ops,
                         batch_size=batch_size,
                         before_hooks=self.max_norm_ops,
-                        fuzz=(0.1 * 0.7**global_epoch if global_epoch<15 else 5e-5))) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
+                        fuzz=(1e-2 * 0.8**global_epoch + 1e-5))) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-                    print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
+                    if n_steps>1:
+                        print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                     train_rmses.append( train_abs_rmse )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
-
-                #for W in self._weight_matrices():
-                #    w_matrix = self.sess.run(W)
-                #    if W.name in old_weights:
-                #        dw = np.sum( (w_matrix - old_weights[W.name])**2 / w_matrix.size )**0.5 # rmse between old weights and new
-                #        dw /= learning_rate # divide by learning rate
-                #        dw /= rd_train.num_batches(batch_size) # divide by number of gradient steps taken to get average rms change per step
-                #        if '_l1:0' in W.name: # first layer, print name
-                #            print(W.name, end=' ')
-                #        print('%.2g' % dw, end=' ')
-                #    old_weights[W.name] = w_matrix
-                #print('')
-
                 local_epoch_count = train_results[0][2]
                 test_abs_rmse_time = time.time()
                 test_abs_rmse = self.eval_abs_rmse(rd_test)
-                #print('test_abs_rmse_time', time.time()-test_abs_rmse_time )
                 time_per_epoch = time.time() - start_time
                 start_time = time.time()
                 print(save_dir, end=' ')
-                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), 'batch_size', batch_size, '| train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
+                print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, '| l-epoch', local_epoch_count, '| lr', "{0:.0e}".format(learning_rate), '| batch_size', batch_size, '| train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 test_rmses.append( test_abs_rmse )
                 # dynamic learning rate - let lr find its own best value based on trend of train rmse
                 # shouldn't look at test or especially validation error, that would be cheating and lead to overfitting
-                if len(train_rmses) > 3 and global_epoch<=50:
+                if len(train_rmses) > 4 and global_epoch<50: # early in tratining, want highest stable lr
                     # if train error is dropping TOO smoothly, lr is probably too low
-                    train_rmse_changes = [ train_rmses[-ii-1]-train_rmses[-ii-2] for ii in range(3)]
+                    train_rmse_changes = [ train_rmses[-ii-1]-train_rmses[-ii-2] for ii in range(4)]
                     if all( [t<0.0 for t in train_rmse_changes] ): # train rmse has dropped for last N epochs
                         self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 1.5)) )
                 if len(train_rmses) > 1 :
                     # reduce lr right away if training error rises fast - indicates numerical instability
                     train_rmse_ratio = train_rmses[-1]/train_rmses[-2]
+                    if train_rmse_ratio > 3.0: # very large increase
+                        self.load_numpy(save_dir+'/best.npz')
+                        self.sess.run(tf.assign(self.global_epoch_count, global_epoch))
                     if train_rmse_ratio > 1.5: # train rmse has risen by more than 50% in one step
                         self.sess.run( tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.75)) )
                 # the strongest evidence of numerical instability: NaN values
@@ -1078,16 +1072,15 @@ class TrainerMultiTower():
                 print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
                 for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
                     print(name, "abs/rel rmses", "{0:.2f} kcal/mol,".format(self.eval_abs_rmse(ff_data)), \
-                        "{0:.2f} kcal/mol | ".format(self.eval_eh_rmse(ff_data, ff_groups)), end='')
+                            "{0:.2f} kcal/mol | ".format(self.eval_eh_rmse(ff_data, ff_groups)), end='')
                 
                 print('')
                 self.save(save_dir)
                 
             print("========== Decreasing learning rate, increasing batch size ==========")
-            self.load_best_params()
-            self.load_numpy(save_dir+'/best.npz')
+            #self.load_numpy(save_dir+'/best.npz')
             self.sess.run(self.decr_learning_rate)
             self.sess.run(self.reset_local_epoch_count)
-            batch_size += 16
+            #batch_size += 16
             self.sess.run(tf.assign(self.global_epoch_count, global_epoch)) # because this gets wiped out during numpy load
 
