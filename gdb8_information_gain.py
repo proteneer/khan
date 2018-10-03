@@ -4,6 +4,7 @@ import numpy as np
 import time
 import tensorflow as tf
 import sklearn.model_selection
+import scipy.optimize
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
@@ -20,65 +21,39 @@ import argparse
 
 def expected_information_gain(trainers):
     model_energies = []
-    model_x0s = []
+    model_ms = []
+    model_xs = []
+    model_ys = []
+    model_zs = []
 
     for t in trainers:
-        print("Computing gain from", t)
         model_energies.append(t.tower_preds[0])
         x, y, z, m = t.tower_xs[0], t.tower_ys[0], t.tower_zs[0], t.tower_ms[0]
-        x0 = tf.stack([x,y,z])
-        model_x0s.append(x0)
+        model_xs.append(x)
+        model_ys.append(y)
+        model_zs.append(z)
+        model_ms.append(m)
 
     expected_info_gain = 0.0
 
     # (ytz): implement custom information KL/Prob stuff here
-    for e, x in zip(model_energies, model_x0s):
+    # iterate over M models
+    for e in model_energies:
+        # e has num_mols elements
         expected_info_gain += tf.norm(e)
-        expected_info_gain += tf.norm(x)
+        # expected_info_gain += tf.norm(x)
 
-    model_gradients = []
+    grad_xs = []
+    grad_ys = []
+    grad_zs = []
 
-    for x in model_x0s:
-        grad = tf.gradients(expected_info_gain, x)
-        model_gradients.append(grad)
+    for t_idx, t in enumerate(trainers):
+        grad_xs.append(tf.gradients(expected_info_gain, model_xs[t_idx]))
+        grad_ys.append(tf.gradients(expected_info_gain, model_ys[t_idx]))
+        grad_zs.append(tf.gradients(expected_info_gain, model_zs[t_idx]))
 
-    return expected_info_gain, model_gradients
 
-
-# def run_one_epoch(args):
-
-#     trainer, rd_train, rd_test = args
-
-#     # predicted energies
-#     energies = trainer.tower_preds[0]
-
-#     train_ops = [
-#         trainer.global_epoch_count,
-#         trainer.learning_rate,
-#         trainer.local_epoch_count,
-#         trainer.unordered_l2s,
-#         trainer.train_op,
-#     ]
-
-#     batch_size = 1024
-
-#     start_time = time.time()
-#     train_results = list(trainer.feed_dataset(
-#         rd_train,
-#         shuffle=True,
-#         target_ops=train_ops,
-#         batch_size=batch_size,
-#         before_hooks=trainer.max_norm_ops))
-
-#     global_epoch = train_results[0][0]
-#     time_per_epoch = time.time() - start_time
-#     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-#     learning_rate = train_results[0][1]
-#     local_epoch_count = train_results[0][2]
-
-#     test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-#     print("trainer:", trainer, time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-#         'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='\n')
+    return expected_info_gain, grad_xs, grad_ys, grad_zs, model_ms
 
 
 def generate_feed_dict(trainer, mol_xs, mol_idxs, mol_yts, mol_grads, b_idx):
@@ -109,53 +84,18 @@ def generate_feed_dict(trainer, mol_xs, mol_idxs, mol_yts, mol_grads, b_idx):
 
 
 def submit_dataset(session, trainers, dataset, batch_size, shuffle, fuzz=None):
-
-    accum = 0
-
     try:
-
         executor = ThreadPoolExecutor(len(trainers))
-        
         futures = []
         n_batches = dataset.num_batches(batch_size)
         for b_idx, (mol_xs, mol_idxs, mol_yts, mol_grads) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=fuzz)):
-            
             atom_types = (mol_xs[:, 0]).astype(np.int32)
-
             for t_idx, trainer in enumerate(trainers):
-
                 assert(trainer.num_towers == 1)
-
-                # def closure():
-                #     feed_dict = {
-                #         trainer.x_enq: mol_xs[:, 1],
-                #         trainer.y_enq: mol_xs[:, 2],
-                #         trainer.z_enq: mol_xs[:, 3],
-                #         trainer.a_enq: atom_types,
-                #         trainer.m_enq: mol_idxs,
-                #         trainer.yt_enq: mol_yts,
-                #         trainer.bi_enq: b_idx
-                #     }
-
-                #     if mol_grads is not None:
-                #         feed_dict[trainer.force_enq_x] = mol_grads[:, 0]
-                #         feed_dict[trainer.force_enq_y] = mol_grads[:, 1]
-                #         feed_dict[trainer.force_enq_z] = mol_grads[:, 2]
-                #     else:
-                #         num_mols = mol_xs.shape[0]
-                #         feed_dict[trainer.force_enq_x] = np.zeros((num_mols, 0), dtype=trainer.precision.as_numpy_dtype)
-                #         feed_dict[trainer.force_enq_y] = np.zeros((num_mols, 0), dtype=trainer.precision.as_numpy_dtype)
-                #         feed_dict[trainer.force_enq_z] = np.zeros((num_mols, 0), dtype=trainer.precision.as_numpy_dtype)
-
-
-                #     print("Enqueue", b_idx, "on trainer", t_idx)
-                #     print("Feed_dict", feed_dict)
                 fd = generate_feed_dict(trainer, mol_xs, mol_idxs, mol_yts, mol_grads, b_idx)
                 future = executor.submit(functools.partial(session.run, fetches=trainer.put_op, feed_dict=fd))
-
                 futures.append(future)
 
-            print("waiting...")
             # important in conjunction with underlying FIFO queue to ensure order
             for f in futures:
                 f.result()
@@ -165,6 +105,38 @@ def submit_dataset(session, trainers, dataset, batch_size, shuffle, fuzz=None):
         exit()
 
 
+def dataset_to_flat(xs):
+    mol_idxs_coords = []
+    mol_idxs_types = []
+    atom_types = []
+    flattened_xs = []
+    for m_idx, x in enumerate(xs):
+        atypes = x[:, 0]
+        coords = x[:, 1:]
+        mol_idxs_coords.extend([m_idx]*coords.size)
+        mol_idxs_types.extend([m_idx]*atypes.size)
+        flattened_xs.append(coords.flatten())
+        atom_types.append(atypes)
+    return np.array(mol_idxs_coords), np.array(mol_idxs_types), np.concatenate(flattened_xs), np.concatenate(atom_types)
+
+
+def flat_to_dataset(mol_idxs_coords, mol_idxs_types, flattened_xs, atom_types):
+    # print("flattened_xs", flattened_xs[:64])
+    # print("mol_idxs_coords", mol_idxs_coords[:64])
+
+    # print("LAST", mol_idxs_coords[-1])
+    # print(type(mol_idxs_coords[0]))
+    # print(flattened_xs[mol_idxs_coords==0])
+    print(len(mol_idxs_coords), len(atom_types))
+    split_xs = [flattened_xs[mol_idxs_coords==i] for i in range(mol_idxs_coords[-1]+1)]
+    split_types = [atom_types[mol_idxs_types==i] for i in range(mol_idxs_types[-1]+1)]
+    data = []
+    for x, atypes in zip(split_xs, split_types):
+        coords = x.reshape((-1, 3))
+        types = atypes.reshape((-1, 1))
+        acoords = np.hstack([types, coords])
+        data.append(acoords)
+    return data
 
 def main():
 
@@ -198,32 +170,32 @@ def main():
 
     all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
 
-    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
-    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+    # all_Xs is the x0
+
+    # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+    # rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+
+    rd_train = RawDataset(all_Xs, all_Ys)
+
+    # print("START")
+    # a_idxs, m_idxs, data, atypes = dataset_to_flat(rd_train.all_Xs)
+    # raw_data = flat_to_dataset(a_idxs, m_idxs, data, atypes)
+
+    # for a, b in zip(rd_train.all_Xs, raw_data):
+    #     np.testing.assert_array_equal(a, b)
+
+    # # print(rd_retrain)
+
+    # assert 0
 
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
-    batch_size = 4
+    batch_size = 256
 
     config = tf.ConfigProto(allow_soft_placement=True)
 
     with tf.Session(config=config) as sess:
-
-        # This training code implements cross-validation based training, whereby we determine convergence on a given
-        # epoch depending on the cross-validation error for a given validation set. When a better cross-validation
-        # score is detected, we save the model's parameters as the putative best found parameters. If after more than
-        # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
-        # rate and restore the best found parameters.
-
-        # n_gpus = int(args.gpus)
-        # if n_gpus > 0:
-        #     towers = ["/gpu:"+str(i) for i in range(n_gpus)]
-        # else:
-        #     towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
-
-        # print("towers:", towers)
-
 
         M = 2
 
@@ -235,136 +207,87 @@ def main():
                     sess,
                     towers=["/cpu:"+str(m)],
                     layer_sizes=(128, 128, 64, 1),
-                    precision=tf.float32
+                    precision=tf.float64
                 )
                 trainers.append(trainer)
 
-        expected_gain, model_gradients = expected_information_gain(trainers)
+        expected_gain, dx, dy, dz, ms = expected_information_gain(trainers)
 
         sess.run(tf.global_variables_initializer())
 
 
-        # submit_dataset(session=sess, trainers=trainers, dataset=rd_train, batch_size=batch_size, shuffle=True, fuzz=None)
-
-        # assert 0
-
-        executor = ThreadPoolExecutor(1)
-
-        # executor.submit(functools.partial(trainer.submit_dataset, dataset=rd_train, batch_size=batch_size, shuffle=True))
-
-        future = executor.submit(submit_dataset, session=sess, trainers=trainers, dataset=rd_train, batch_size=batch_size, shuffle=True, fuzz=None)
-
-
-        print("Waiting...")
-
-
-        n_batches = rd_train.num_batches(batch_size)
-
-        for bid in range(n_batches):
-            print("Dequeue", bid)
-            sess.run([expected_gain, model_gradients])
-            print("Dequeue done")
+        def min_func(x0s, atom_types, mol_idxs_types, mol_idxs_coords):
+            raw_data = flat_to_dataset(mol_idxs_types, mol_idxs_coords, x0s, atom_types)
+            rd_train.all_Xs = raw_data
         
-        future.result()
+            executor = ThreadPoolExecutor(1)
 
-        # time.sleep(10)
+            future = executor.submit(
+                submit_dataset,
+                session=sess,
+                trainers=trainers,
+                dataset=rd_train,
+                batch_size=batch_size,
+                shuffle=False,
+                fuzz=None)
 
-        assert 0
+            n_batches = rd_train.num_batches(batch_size)
 
+            print("num_batches..", n_batches)
 
+            dxs = []
 
+            total_gain = 0
 
-        # sess.run(tf.global_variables_initializer())
+            for bid in range(n_batches):
+                gain, nx, ny, nz, nm = sess.run([expected_gain, dx, dy, dz, ms])
+                total_gain += gain
+                indices = nm[0]
 
-        pool = ThreadPool(2)
+                # average the gradients across all models
+                sx = np.sum(nx, axis=0)
+                sy = np.sum(ny, axis=0)
+                sz = np.sum(nz, axis=0)
+                dxdydz = np.squeeze(np.stack([sx, sy, sz], axis=-1))
+                split_dxdydz = [dxdydz[indices==i] for i in range(indices[-1]+1)]
+                dxs.extend(split_dxdydz)
 
-        for e in range(5):
-            pool.map(run_one_epoch, all_data)
+            future.result()
 
-        # need to use saver across all
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        save_path = os.path.join(save_dir, "model.ckpt")
-        saver.save(sess, save_path)
+            grads = np.concatenate([x.reshape(-1) for x in dxs])
 
+            print("Grads shape", grads.shape)
 
-    #     print("all_vars", tf.trainable_variables())
+            print("DTYPE", type(total_gain), grads.dtype)
 
-    #     if os.path.exists(save_dir):
-    #         print("Restoring existing model from", save_dir)
-    #         trainer.load(save_dir)
-    #     else:
+            return total_gain, grads
 
+        a_idxs, m_idxs, data, atypes = dataset_to_flat(rd_train.all_Xs)
 
-    #     max_local_epoch_count = 100
+        print("starting minimization...")
+        result = scipy.optimize.fmin_l_bfgs_b(
+            min_func,
+            data,
+            args=(atypes, a_idxs, m_idxs),
+            maxiter=50, iprint=1, factr=1e1, approx_grad=False, epsilon=1e-6, pgtol=1e-6)
 
-    #     train_ops = [
-    #         trainer.global_epoch_count,
-    #         trainer.learning_rate,
-    #         trainer.local_epoch_count,
-    #         trainer.unordered_l2s,
-    #         trainer.train_op,
-    #     ]
+        # scipy.optimize.minimize(
+        #     fun=min_func,
+        #     method='L-BFGS-B',
+        #     x0=data,
+        #     args=(atypes, a_idxs, m_idxs),
+        #     jac=True
+        # )
 
-    #     best_test_score = trainer.eval_abs_rmse(rd_test)
+            # update dataset's X coordinates via gradient descent
 
-    #     # Uncomment if you'd like gradients for a dataset
-    #     # for feat in trainer.featurize(rd_test):
-    #     #     print(feat.shape)
-
-    #     # for grad in trainer.coordinate_gradients(rd_test):
-    #     #     print(grad.shape)
-
-    #     print("------------Starting Training--------------")
-
-    #     start_time = time.time()
-
-    #     while sess.run(trainer.learning_rate) > 5e-10: # this is to deal with a numerical error, we technically train to 1e-9
-
-    #         while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
-
-    #             # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
-
-    #             start_time = time.time()
-    #             train_results = list(trainer.feed_dataset(
-    #                 rd_train,
-    #                 shuffle=True,
-    #                 target_ops=train_ops,
-    #                 batch_size=batch_size,
-    #                 before_hooks=trainer.max_norm_ops))
-
-    #             global_epoch = train_results[0][0]
-    #             time_per_epoch = time.time() - start_time
-    #             train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
-    #             learning_rate = train_results[0][1]
-    #             local_epoch_count = train_results[0][2]
-
-    #             test_abs_rmse = trainer.eval_abs_rmse(rd_test)
-    #             print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
-    #                 'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
-
-    #             if test_abs_rmse < best_test_score:
-    #                 trainer.save_best_params()
-    #                 gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-    #                 print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
-
-    #                 best_test_score = test_abs_rmse
-    #                 sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
-    #             else:
-    #                 sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
-
-    #             trainer.save(save_dir)
-
-    #             print('', end='\n')
-
-    #         print("==========Decreasing learning rate==========")
-    #         sess.run(trainer.decr_learning_rate)
-    #         sess.run(trainer.reset_local_epoch_count)
-    #         trainer.load_best_params()
-
-    # return
+            # new_Xs = []
+            # for x, dx in zip(rd_train.all_Xs, dxs):
+            #     x[:, 1:] += 0.1*dx
+            
 
 
+            # assert 0
 
 if __name__ == "__main__":
     main()
