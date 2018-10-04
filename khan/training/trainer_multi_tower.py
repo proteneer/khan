@@ -1004,7 +1004,7 @@ class TrainerMultiTower():
         ]
         start_time = time.time()
         best_test_score = self.eval_abs_rmse(rd_test)
-        global_epoch = 0
+        global_epoch = -1
         train_rmses = []
         test_rmses = []
         old_weights = {}
@@ -1014,7 +1014,7 @@ class TrainerMultiTower():
         # bigger batches as fitting goes on, to make updates less exploratory
         while batch_size < max_batch_size and self.sess.run(self.learning_rate)>=min_learning_rate and global_epoch <= max_global_epoch_count:
             while self.sess.run(self.local_epoch_count) < max_local_epoch_count and global_epoch <= max_global_epoch_count:
-                if global_epoch==0:
+                if global_epoch == -1:
                     self.sess.run( tf.assign(self.learning_rate, 1e-4) ) 
                 n_steps = 1
                 for step in range(n_steps): # how many rounds to perform before checking test rmse. Evaluation takes about as long as training for the same number of points, so it can be a waste to evaluate every time. 
@@ -1025,13 +1025,13 @@ class TrainerMultiTower():
                         target_ops=train_ops,
                         batch_size=batch_size,
                         before_hooks=self.max_norm_ops,
-                        fuzz=1e-2 * 0.8**global_epoch + 1e-5) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
+                        fuzz=1e-2 * 0.99**global_epoch + 1e-4) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
                     train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
                     if n_steps>1:
                         print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                     train_rmses.append( train_abs_rmse )
-                if global_epoch==0: # after one epoch of training, can boost lr
-                    self.sess.run( tf.assign(self.learning_rate, 5e-4) )
+                if global_epoch == -1: # after one epoch of training, can boost lr
+                    self.sess.run( tf.assign(self.learning_rate, 3e-4) )
                 global_epoch = train_results[0][0]
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]

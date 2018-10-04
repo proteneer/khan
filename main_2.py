@@ -21,6 +21,21 @@ def get_available_gpus():
     local_device_protos = device_lib.list_local_devices()
     return [x.name for x in local_device_protos if x.device_type == 'GPU']
 
+def apply_nonbonded_correction(dataset):
+    emin = 0.0003 # Hartree. Positive because we're applying it to the dataset: would be negative if applied to the model. 
+    for mol_i in range(dataset.num_mols()):
+        nonbonded_approx = 0.0
+        xx = dataset.all_Xs[mol_i]
+        for i, x1 in enumerate(xx):
+            if x1[0] == 0.0: continue # skip H
+            for x2 in xx[i+1:]:
+                if x2[0] == 0.0: continue # skip H
+                r2 = np.sum( (x1[1:] - x2[1:])**2 )
+                nonbonded_approx += emin * 5**6/(r2**6 + 5**12)**0.5
+            #print(x1[0], x2[0], 0.1 * 5**6/(r2**6 + 5**12)**0.5 )
+        dataset.all_ys[mol_i] += nonbonded_approx
+    print('Nonbonded correction of dataset size', dataset.num_mols())
+
 def main():
     #avail_gpus = get_available_gpus()
     #print("Available GPUs:", avail_gpus)
@@ -166,6 +181,9 @@ def main():
             trainer.load_numpy(save_dir+'/best.npz')
         else: # initialize new random parameters
             trainer.initialize()
+
+        #for dataset in ([rd_train, rd_test, rd_gdb11] + eval_datasets[:1]):
+        #    apply_nonbonded_correction(dataset)
 
         for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
             print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups))) 

@@ -19,12 +19,11 @@ kT = 0.001 # in Hartree
 NN_LAYERS = tuple([256]*4 + [1])
 NN_ACTIVATION = 'waterslide'
 
-def load_NN_models(filenames, sessions):
+def load_NN_models(filenames, sess):
     # files are expected to be in npz format
     # sess should be an initialized tensorflow session
     models = []
     for n, filename in enumerate(filenames):
-        sess = sessions[n]
         towers = ["/cpu:0"]  # consider using ["/cpu:%d" % n] ?
         layers = NN_LAYERS
         activation_fn = activations.get_fn_by_name(NN_ACTIVATION)
@@ -164,35 +163,37 @@ def run_opt(xyz, models, n_results=1):
 
     # maximize mean probability at start (to provide a good start point)
     x0 = min_x
-    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=50, iprint=1, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
+    result = scipy.optimize.fmin_l_bfgs_b(opt_P_func, x0, args=(elements, min_Es, models), maxiter=50, iprint=0, factr=1e3, pgtol=1e-4*kT, approx_grad=True, epsilon=1e-6)
     x0, P0, success = result
     print('P0 =', -P0)
     print('Max P geometry:', '\n'.join([str(s) for s in zip(elements, np.reshape(x0, (-1, 3)))]))
     # run scipy optimize
     print( 'Initial expected info =', -opt_info_func(x0, elements, min_Es, models, False))
-    xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
-    xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
-    result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=50, iprint=1, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
-    x_final, fun_final, success = result
-    #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':len(xs)*10,'disp':True})
+    #for n_results in range(1,20):
+    if True:
+        xs = np.concatenate( [x0] * n_results ) # split starting geom into n_results starting geoms
+        xs += np.random.normal(scale=0.01, size=xs.shape) # randomize starting positions a little
+        import time
+        start = time.time()
+        result = scipy.optimize.fmin_l_bfgs_b(opt_info_func, xs, args=(elements, min_Es, models), maxiter=300, iprint=0, factr=1e1, approx_grad=True, epsilon=1e-6, pgtol=1e-6*kT)
+        x_final, fun_final, success = result
+        #result = scipy.optimize.minimize(opt_info_func, xs, args=(elements, min_Es, models), method='Nelder-Mead', options={'maxiter':500})
+        print('Info opt time:', time.time() - start, 'seconds', -fun_final)
     #x_final, fun_final = result.x, result.fun
     #result = scipy.optimize.basinhopping(opt_info_func, xs, minimizer_kwargs={'args':(elements, min_Es, models), 'method':'Nelder-Mead'}, niter=5, T=1.0, stepsize=1.0, disp=True) # T is in kT units, stepsize in Angstroms
     #x_final, fun_final = result.x, result.fun
     print('Final expected info =', -fun_final)
-    print('Max P geometry:')
     xyzs = np.reshape(x0, (1, len(elements), 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
-    for n in range(1):
-        print(len(elements))
-        print('Result', n)
-        for el, xx in zip(elements, xyzs[n]):
-            print(element_names[el], '%f %f %f' % tuple(xx))
-    print('Max info geometry:')
+    print(len(elements))
+    print('Max P geometry')
+    for el, xx in zip(elements, xyzs[0]):
+        print(element_names[el], '%f %f %f' % tuple(xx))
     xyzs = np.reshape(x_final, (n_results, len(elements), 3))
     element_names = {1.0:'H', 6.0:'C', 7.0:'N', 8.0:'O'}
     for n in range(n_results):
         print(len(elements))
-        print('Result', n)
+        print('Max info', n)
         for el, xx in zip(elements, xyzs[n]):
             print(element_names[el], '%f %f %f' % tuple(xx))
 
@@ -210,8 +211,8 @@ def test_nn_opt(xyz_filename, kT, n_results):
     initialize_module(lib_path)
     config = tf.ConfigProto(allow_soft_placement=True)
     #with tf.Session(config=config) as sess
-    sessions = [ tf.Session(config=config) for name in model_filenames ]
-    models = load_NN_models(model_filenames, sessions)
+    sess = tf.Session(config=config)
+    models = load_NN_models(model_filenames, sess)
     run_opt(test_xyz, models, n_results)
 
 #import profile
