@@ -8,6 +8,7 @@ import scipy.optimize
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
+import data_utils
 from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
@@ -17,17 +18,20 @@ from multiprocessing.dummy import Pool as ThreadPool
 import multiprocessing
 import argparse
 
+BOHR_PER_ANGSTROM = 0.52917721092
+kT = 0.001 # in Hartree
+NN_LAYERS = tuple([256]*4 + [1])
 
 
-def expected_information_gain(trainers):
+def expected_information_gain(trainers, min_Es):
     model_energies = []
     model_ms = []
     model_xs = []
     model_ys = []
     model_zs = []
 
-    for t in trainers:
-        model_energies.append(t.tower_preds[0])
+    for t, min_Es_per_point in zip(trainers, min_Es):
+        model_energies.append(t.tower_preds[0] - min_Es_per_point)
         x, y, z, m = t.tower_xs[0], t.tower_ys[0], t.tower_zs[0], t.tower_ms[0]
         model_xs.append(x)
         model_ys.append(y)
@@ -38,10 +42,11 @@ def expected_information_gain(trainers):
 
     # (ytz): implement custom information KL/Prob stuff here
     # iterate over M models
-    for e in model_energies:
-        # e has num_mols elements
-        expected_info_gain += tf.norm(e)
-        # expected_info_gain += tf.norm(x)
+    M_models = len(trainers)
+    N_points = len(min_Es[0])
+    for i in range(N_points):
+        P_i = tf.reduce_mean( [ tf.exp(-model_energies[j][i]/kT) for j in range(M_models)] )
+        expected_info_gain += P_i
 
     grad_xs = []
     grad_ys = []
@@ -138,6 +143,24 @@ def flat_to_dataset(mol_idxs_coords, mol_idxs_types, flattened_xs, atom_types):
         data.append(acoords)
     return data
 
+
+
+def model_E_and_grad(xyz, nn_atom_types, model):
+    # xyz and elements must be merged into [element, x, y, z]
+    # model must be a Trainer object
+    xyz = [[i]+list(xx) for i, xx in zip(nn_atom_types, xyz)]
+    #print('in model_E_and_grad, xyz =', xyz)
+    rd = RawDataset([xyz], [0.0])
+    energy = float(model.predict(rd)[0])
+    self_interaction = np.sum(data_utils.selfIxnNrgWB97X_631gdp[t] for t in nn_atom_types)
+    energy += self_interaction
+    gradient = list(model.coordinate_gradients(rd))[0]
+    gradient = gradient.reshape(gradient.size)
+    gradient *= BOHR_PER_ANGSTROM
+    return energy, gradient
+
+
+
 def main():
 
     parser = argparse.ArgumentParser(description="Run ANI1 neural net training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -168,28 +191,8 @@ def main():
 
     data_loader = DataLoader(False)
 
-    all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
-
-    # all_Xs is the x0
-
-    # X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
-    # rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
-
-    rd_train = RawDataset(all_Xs, all_Ys)
-
-    # print("START")
-    # a_idxs, m_idxs, data, atypes = dataset_to_flat(rd_train.all_Xs)
-    # raw_data = flat_to_dataset(a_idxs, m_idxs, data, atypes)
-
-    # for a, b in zip(rd_train.all_Xs, raw_data):
-    #     np.testing.assert_array_equal(a, b)
-
-    # # print(rd_retrain)
-
-    # assert 0
-
-    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
-    rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
+    xyz = [ [3.0,  0.0, 0.0, 0.0], [0.0,  1.0, 0.0, 0.0], [0.0,  0.0, 1.0, 0.0] ]
+    dataset = RawDataset([xyz], 0.0)
 
     batch_size = 256
 
@@ -197,28 +200,54 @@ def main():
 
     with tf.Session(config=config) as sess:
 
-        M = 2
+        M = 3  # number of models
+        N = dataset.num_mols()
 
         trainers = []
+        min_Es = np.zeros((M, N))
+
+        def min_E_func(x_flat, elements, model):
+            # basic energy function to optimize, for finding min_E
+            xyz = np.reshape(x_flat, (-1, 3))
+            #print('in opt_E_func, xyz =', xyz, 'elements =', elements)
+            E, grad = model_E_and_grad(xyz, elements, model)
+            return E, grad
 
         for m in range(M):
             with tf.variable_scope("model_"+str(m)):
                 trainer = TrainerMultiTower(
                     sess,
                     towers=["/cpu:"+str(m)],
-                    layer_sizes=(128, 128, 64, 1),
+                    layer_sizes=NN_LAYERS,
                     precision=tf.float64
                 )
-                trainers.append(trainer)
+            trainers.append(trainer)
 
-        expected_gain, dx, dy, dz, ms = expected_information_gain(trainers)
+        expected_gain, dx, dy, dz, ms = expected_information_gain(trainers, min_Es)
 
         sess.run(tf.global_variables_initializer())
 
+        model_filenames = ['/nfs/working/scidev/stevenso/learning/khan_internal/train/sep28_%d/save/best.npz' % (i+1) for i in range(M)]
+        for m, trainer in enumerate(trainers):
+            with tf.variable_scope("model_"+str(m)):
+                trainer.load_numpy(model_filenames[m], strict=False)
+            for n in range(N):
+                xs = dataset.all_Xs[n]
+                elements = [row[0] for row in xs]
+                x0 = [row[1:] for row in xyz]
+                x0 = np.reshape(x0, len(x0) * 3 )
+                result = scipy.optimize.fmin_l_bfgs_b(
+                     min_E_func,
+                     x0,
+                     args=(elements, trainer),
+                     maxiter=1000, iprint=0, factr=1e1, approx_grad=False, epsilon=1e-6, pgtol=1e-6)
+                min_E = result.fun
+                print('min_E =', min_E)
+                min_Es[m][n] = min_E
 
         def min_func(x0s, atom_types, mol_idxs_types, mol_idxs_coords):
             raw_data = flat_to_dataset(mol_idxs_types, mol_idxs_coords, x0s, atom_types)
-            rd_train.all_Xs = raw_data
+            dataset.all_Xs = raw_data
         
             executor = ThreadPoolExecutor(1)
 
@@ -226,12 +255,12 @@ def main():
                 submit_dataset,
                 session=sess,
                 trainers=trainers,
-                dataset=rd_train,
+                dataset=dataset,
                 batch_size=batch_size,
                 shuffle=False,
                 fuzz=None)
 
-            n_batches = rd_train.num_batches(batch_size)
+            n_batches = dataset.num_batches(batch_size)
 
             print("num_batches..", n_batches)
 
@@ -260,9 +289,9 @@ def main():
 
             print("DTYPE", type(total_gain), grads.dtype)
 
-            return total_gain, grads
+            return -total_gain, -grads  # negative because we're maximizing
 
-        a_idxs, m_idxs, data, atypes = dataset_to_flat(rd_train.all_Xs)
+        a_idxs, m_idxs, data, atypes = dataset_to_flat(dataset.all_Xs)
 
         print("starting minimization...")
         result = scipy.optimize.fmin_l_bfgs_b(
@@ -279,20 +308,14 @@ def main():
         #     jac=True
         # )
 
-            # update dataset's X coordinates via gradient descent
-
-            # new_Xs = []
-            # for x, dx in zip(rd_train.all_Xs, dxs):
-            #     x[:, 1:] += 0.1*dx
-            
-
-
-            # assert 0
-
 if __name__ == "__main__":
     main()
 
-
+'''
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/gridengine/lib/lx-amd64:/opt/openmpi/lib:/nfs/utils/stow/Python-3.5.3/lib/:/nfs/utils/stow/cuda-9.0/lib64/:/home/yzhao/libs/cuda/lib64
+source /home/yzhao/venv/bin/activate
+python -u ../gdb8_information_gain.py --work-dir info_gain_0 --ani_lib ../gpu_featurizer/ani.so
+'''
 
 
 
