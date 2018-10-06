@@ -2,6 +2,7 @@ import os
 import numpy as np
 import time
 import pickle
+import random
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 
@@ -142,7 +143,7 @@ def main():
         print("towers:", towers)
 
         #layer_sizes=(128, 128, 64, 1) # original
-        layer_sizes=tuple( 4*[256] + [1] )
+        layer_sizes=tuple( 6*[256] + [1] )
         #layer_sizes=(1,) # linear
         print('layer_sizes:', layer_sizes)
         n_weights = sum( [layer_sizes[i]*layer_sizes[i+1] for i in range(len(layer_sizes)-1)] )
@@ -163,8 +164,36 @@ def main():
 
         print("------------Initializing model--------------")
 
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, train_size=train_size, test_size=test_size) # stratify by UTT would be good to try here
-        rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+        #X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(Xs, ys, train_size=train_size, test_size=test_size)
+
+        # split train/test by unique element tuples
+        data = zip(Xs, ys)
+        data_by_elements = {}
+        for x, y in data:
+            elements = tuple(x[0,:]) # consider sorting this
+            if elements not in data_by_elements:
+                data_by_elements[elements] = []
+            data_by_elements[elements].append( (x, y) )
+        all_elements = list(data_by_elements.keys())
+        random.shuffle(all_elements)
+        n_train = int(train_size * len(Xs))
+        n_test = int(test_size * len(Xs))
+        X_train, X_test, y_train, y_test = [], [], [], []
+        for elements in all_elements:
+            xy = data_by_elements[elements]
+            xx, yy = zip(*xy)
+            if len(y_train) < n_train:
+                X_train += xx
+                y_train += yy
+            elif len(y_test) < n_test:
+                X_test += xx
+                y_test += yy
+            else:
+                break
+
+        rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,
+
+  y_test)
         print( 'n_train =', len(y_train), 'n_test =', len(y_test) )
 
         trainer = TrainerMultiTower(
@@ -182,10 +211,11 @@ def main():
         else: # initialize new random parameters
             trainer.initialize()
 
-        #for dataset in ([rd_train, rd_test, rd_gdb11] + eval_datasets[:1]):
-        #    apply_nonbonded_correction(dataset)
+        if False:  # basic nonbonded correction term
+            for dataset in ([rd_train, rd_test, rd_gdb11] + eval_datasets[:-1]):
+                apply_nonbonded_correction(dataset)
 
-        for name, ff_data, ff_groups in zip(eval_names, eval_datasets, eval_groups):
+        for name, ff_data, ff_groups in zip(eval_names[:-1], eval_datasets[:-1], eval_groups[:-1]):
             print(name, "abs/rel rmses: {0:.6f} kcal/mol | ".format(trainer.eval_abs_rmse(ff_data)) + "{0:.6f} kcal/mol".format(trainer.eval_eh_rmse(ff_data, ff_groups))) 
 
         print("------------Starting Training--------------")
