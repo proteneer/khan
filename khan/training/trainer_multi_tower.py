@@ -330,6 +330,10 @@ class TrainerMultiTower():
             self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
             # these data elements are unordered since the gpu grabs the batches in different orders
+            self.tower_xs = []
+            self.tower_ys = []
+            self.tower_zs = []
+            self.tower_ms = []
             self.tower_grads = [] # average is order invariant
             self.tower_force_grads = [] # yell at yutong for naming this
             self.tower_preds = []
@@ -356,6 +360,10 @@ class TrainerMultiTower():
                             with tf.device('/cpu:0'):
                                 get_op = queue.dequeue()
                                 x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
+                                self.tower_xs.append(x_deq)
+                                self.tower_ys.append(y_deq)
+                                self.tower_zs.append(z_deq)
+                                self.tower_ms.append(m_deq)
 
                                 dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
 
