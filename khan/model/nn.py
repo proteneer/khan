@@ -47,40 +47,39 @@ class AtomNN():
             # print('Layer', idx, 'input/output size', x, y)
             name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            with tf.device('/cpu:0'):
 
-                W = tf.get_variable(
-                    prefix+"W"+name,
+            W = tf.get_variable(
+                prefix+"W"+name,
+                (x, y),
+                precision,
+                #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
+                tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
+                trainable=True
+            )
+            b = tf.get_variable(
+                prefix+"b"+name,
+                (y),
+                precision,
+                tf.zeros_initializer,
+                trainable=True
+            )
+
+            # interception layers
+            if idx >= len(layer_sizes) - interception_count:
+                u_W = tf.get_variable(
+                    prefix+"u_W"+name,
                     (x, y),
                     precision,
-                    #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
-                    tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
+                    tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
                     trainable=True
                 )
-                b = tf.get_variable(
-                    prefix+"b"+name,
+                u_b = tf.get_variable(
+                    prefix+"u_b"+name,
                     (y),
                     precision,
                     tf.zeros_initializer,
                     trainable=True
                 )
-
-                # interception layers
-                if idx >= len(layer_sizes) - interception_count:
-                    u_W = tf.get_variable(
-                        prefix+"u_W"+name,
-                        (x, y),
-                        precision,
-                        tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
-                        trainable=True
-                    )
-                    u_b = tf.get_variable(
-                        prefix+"u_b"+name,
-                        (y),
-                        precision,
-                        tf.zeros_initializer,
-                        trainable=True
-                    )
 
             A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
