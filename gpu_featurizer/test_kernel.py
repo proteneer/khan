@@ -7,8 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 import tensorflow as tf
 from tensorflow.python.framework import ops
 import numpy as np
+import os
 
-ani_mod = tf.load_op_library('ani.so');
+ani_path = os.path.join(os.getcwd(), 'ani.so')
+ani_mod = tf.load_op_library(ani_path)
 
 @ops.RegisterGradient("AniCharge")
 def _ani_charge_grad(op, grads):
