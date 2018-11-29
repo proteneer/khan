@@ -108,7 +108,7 @@ def main():
         trainer = TrainerMultiTower(
             sess,
             towers=towers,
-            precision=tf.float64,
+            precision=tf.float32,
             # layer_sizes=(128, 128, 128, 64, 64, 64, 1),
             layer_sizes=(258, 128, 64, 1),
             activation_fn=activation_fn,
@@ -137,8 +137,6 @@ def main():
         # norm_ops = [
             # trainer.tower_norms
         # ]
-
-        print("NUM_TOWER_NORMS", len(trainer.tower_norms))
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
@@ -192,26 +190,6 @@ def main():
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
-
-
-                if local_epoch_count % 20 == 0:
-                    print("\nTesting uncertainty...")
-                    E_pred = trainer.predict(rd_gdb11)
-                    E_uncertainty = trainer.predict_uncertainties(rd_gdb11)
-                    E_abs = np.abs(np.array(E_pred) - np.array(y_gdb11))
-                    
-                    import matplotlib.pyplot as plt
-
-                    plt.clf()
-                    plt.scatter(E_abs, E_uncertainty, s=0.1)
-                    plt.savefig('gdb10_'+str(global_epoch), dpi=400)
-
-                    print(E_abs.shape, E_uncertainty[0].shape)
-                    print((E_abs/E_uncertainty).shape)
-
-                    plt.clf()
-                    plt.hist(E_abs/E_uncertainty, bins=50)
-                    plt.savefig('gdb10_hist_'+str(global_epoch), dpi=400)                   
 
                 # if test_abs_rmse < best_test_score:
                 #     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)

@@ -337,7 +337,6 @@ class TrainerMultiTower():
             self.tower_grads = [] # average is order invariant
             self.tower_force_grads = [] # yell at yutong for naming this
             self.tower_preds = []
-            self.tower_pred_uncertainties = []
             self.tower_bids = []
             self.tower_l2s = []
             self.tower_mos = []
@@ -426,11 +425,6 @@ class TrainerMultiTower():
                             self.all_models.append(tower_model_near)
                             tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
 
-                            # sum of softplus is still guaranteed to strictly greater than 0.
-                            tower_near_uncertainty = tf.segment_mean(tower_model_near.atom_uncertainties, m_deq)
-                            # uncertainty
-                            # layer_sizes[-1] += 1
-
                             if fit_charges:
                                 assert 0
                                 tower_model_charges = MoleculeNN(
@@ -470,7 +464,7 @@ class TrainerMultiTower():
                             tf.get_variable_scope().reuse_variables()
 
                             self.tower_preds.append(tower_pred)
-                            self.tower_pred_uncertainties.append(tower_near_uncertainty)
+
 
                             tower_l2 = tf.squared_difference(tower_pred, labels)
                             self.tower_l2s.append(tower_l2)
@@ -478,8 +472,6 @@ class TrainerMultiTower():
                             tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
 
                             self.tower_exp_loss.append(tower_exp_loss)
-                            tower_log_laplacian = tf.reduce_mean(tf.abs(tower_pred - labels)/tower_near_uncertainty) + \
-                                tf.reduce_mean(tf.log(tower_near_uncertainty))
 
                             tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
 
@@ -809,36 +801,6 @@ class TrainerMultiTower():
 
 
         # todo: fix
-        ordered_ys = []
-        for (ys, ids) in results:
-            sorted_ys = np.take(ys, np.argsort(ids), axis=0)
-            ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
-        return ordered_ys
-
-    def predict_uncertainties(self, dataset, batch_size=2048):
-        """
-        Infer y-values given a dataset.
-
-        Parameters
-        ----------
-        dataset: khan.RawDataset
-            Dataset from which we predict from.
-
-        batch_size: int (optional)
-            Size of each batch used during prediction.
-
-        Returns
-        -------
-        list of floats
-            Returns a list of predicted [y0, y1, y2...] in the same order as the dataset Xs [x0, x1, x2...]
-
-        """
-        results = self.feed_dataset(
-            dataset,
-            shuffle=False,
-            target_ops=[self.tower_pred_uncertainties, self.tower_bids],
-            batch_size=batch_size
-        )
         ordered_ys = []
         for (ys, ids) in results:
             sorted_ys = np.take(ys, np.argsort(ids), axis=0)
