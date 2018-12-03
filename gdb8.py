@@ -5,7 +5,7 @@ import tensorflow as tf
 import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module, FeaturizationParameters
+from khan.training.trainer_multi_tower import Trainer, flatten_results, initialize_module, FeaturizationParameters
 from khan.model import activations
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
@@ -57,7 +57,7 @@ def main():
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
-    batch_size = 1024
+    batch_size = 256
 
     config = tf.ConfigProto(
         allow_soft_placement=True, 
@@ -105,10 +105,10 @@ def main():
             # A_Rs=(5.0000000e-01,1.1500000e+00,1.8000000e+00,2.4500000e+00)
         #)
 
-        trainer = TrainerMultiTower(
+        trainer = Trainer(
             sess,
             towers=towers,
-            precision=tf.float64,
+            precision=tf.float32,
             # layer_sizes=(128, 128, 128, 64, 64, 64, 1),
             layer_sizes=(258, 128, 64, 1),
             activation_fn=activation_fn,
@@ -138,20 +138,20 @@ def main():
             # trainer.tower_norms
         # ]
 
-        print("NUM_TOWER_NORMS", len(trainer.tower_norms))
-
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         # Uncomment if you'd like to inspect the gradients
         all_grads = []
         # for feat in trainer.featurize(rd_test):
-            # np.save('debug',feat)
-            # assert 0
-            # all_grads.append(grad)
+        #     np.save('debug',feat)
+        #     assert 0
+        #     all_grads.append(grad)
 
         # all_grads = []
         # for grad in trainer.coordinate_gradients(rd_test):
         #     all_grads.append(grad)
+
+        # print(all_grads)
         # assert len(all_grads) == rd_test.num_mols()
 
         print("------------Starting Training--------------")
@@ -192,26 +192,6 @@ def main():
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
-
-
-                if local_epoch_count % 20 == 0:
-                    print("\nTesting uncertainty...")
-                    E_pred = trainer.predict(rd_gdb11)
-                    E_uncertainty = trainer.predict_uncertainties(rd_gdb11)
-                    E_abs = np.abs(np.array(E_pred) - np.array(y_gdb11))
-                    
-                    import matplotlib.pyplot as plt
-
-                    plt.clf()
-                    plt.scatter(E_abs, E_uncertainty, s=0.1)
-                    plt.savefig('gdb10_'+str(global_epoch), dpi=400)
-
-                    print(E_abs.shape, E_uncertainty[0].shape)
-                    print((E_abs/E_uncertainty).shape)
-
-                    plt.clf()
-                    plt.hist(E_abs/E_uncertainty, bins=50)
-                    plt.savefig('gdb10_hist_'+str(global_epoch), dpi=400)                   
 
                 # if test_abs_rmse < best_test_score:
                 #     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)

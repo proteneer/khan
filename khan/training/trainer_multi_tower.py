@@ -3,6 +3,8 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import warnings
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.framework import ops
@@ -235,7 +237,7 @@ class FeaturizationParameters():
         return self.radial_size() + self.angular_size()
 
 
-class TrainerMultiTower():
+class Trainer():
 
     def __init__(self,
         sess,
@@ -269,7 +271,9 @@ class TrainerMultiTower():
 
         assert fit_charges is False
         assert (precision is tf.float32) or (precision is tf.float64)
-        assert self.num_towers > 0
+        if self.num_towers > 0:
+            warnings.warn("towers is deprecated and ignored, and will be removed in a future version.", UserWarning)
+
         self.precision = precision
         self.feat_params = featurization_parameters
         self.x_enq = tf.placeholder(dtype=precision)
@@ -313,216 +317,180 @@ class TrainerMultiTower():
         self.sess = sess
         self.non_trainable_variables = []
 
-        with tf.device('/cpu:0'):
-            self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
-            self.optimizer = NadamOptimizer(
-                    learning_rate=self.learning_rate,
-                    beta1=0.9,
-                    beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
-                    epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
+        # with tf.device('/cpu:0'):
+        self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
+        self.optimizer = NadamOptimizer(
+                learning_rate=self.learning_rate,
+                beta1=0.9,
+                beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
+                epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
 
-            self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
-            self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
-            self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
-            self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
-            self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
+        self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
+        self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
+        self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
+        self.local_epoch_count = tf.get_variable('local_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
+        self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
+        self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
+        self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
-            # these data elements are unordered since the gpu grabs the batches in different orders
-            self.tower_xs = []
-            self.tower_ys = []
-            self.tower_zs = []
-            self.tower_ms = []
-            self.tower_grads = [] # average is order invariant
-            self.tower_force_grads = [] # yell at yutong for naming this
-            self.tower_preds = []
-            self.tower_pred_uncertainties = []
-            self.tower_bids = []
-            self.tower_l2s = []
-            self.tower_mos = []
-            self.tower_coord_grads = []
-            self.tower_features = []
-            self.tower_norms = []
-            self.all_models = []
-            self.tower_exp_loss = []
-            self.tower_force_rmses = []
-            # self.tower_log_laplacians = []
-            self.parameters = []
-            self.tower_feat_grads = []
+        # these data elements are unordered since the gpu grabs the batches in different orders
+        self.tower_xs = []
+        self.tower_ys = []
+        self.tower_zs = []
+        self.tower_ms = []
+        self.tower_grads = [] # average is order invariant
+        self.tower_force_grads = [] # yell at yutong for naming this
+        self.tower_preds = []
+        self.tower_bids = []
+        self.tower_l2s = []
+        self.tower_mos = []
+        self.tower_coord_grads = []
+        self.tower_features = []
+        self.tower_norms = []
+        self.all_models = []
+        self.tower_exp_loss = []
+        self.tower_force_rmses = []
+        # self.tower_log_laplacians = []
+        self.parameters = []
+        self.tower_feat_grads = []
 
-            # parameters within a tower are shared.
-            with tf.variable_scope(tf.get_variable_scope()):
-                for tower_idx, tower_device in enumerate(towers):
-                    with tf.device(tower_device):
-                        with tf.name_scope("%s_%d" % ("tower", tower_idx)) as scope:
+        # with tf.device('/cpu:0'):
+        get_op = queue.dequeue()
+        x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
+        self.tower_xs.append(x_deq)
+        self.tower_ys.append(y_deq)
+        self.tower_zs.append(z_deq)
+        self.tower_ms.append(m_deq)
 
-                            with tf.device('/cpu:0'):
-                                get_op = queue.dequeue()
-                                x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
-                                self.tower_xs.append(x_deq)
-                                self.tower_ys.append(y_deq)
-                                self.tower_zs.append(z_deq)
-                                self.tower_ms.append(m_deq)
+        dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
 
-                                dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
+        self.tower_bids.append(bi_deq)
+        mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
+        mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
-                                self.tower_bids.append(bi_deq)
-                                mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
-                                mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
+        scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
 
-                                scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
+        self.tower_mos.append(mol_offsets)
 
-                                self.tower_mos.append(mol_offsets)
+        # with tf.device(tower_device):
+        f0, f1, f2, f3 = ani_mod.featurize(
+            x_deq,
+            y_deq,
+            z_deq,
+            a_deq,
+            mol_offsets,
+            mol_atom_counts,
+            scatter_idxs,
+            atom_counts,
+            name="ani_op",
+            n_types=self.feat_params.n_types,
+            R_Rc=self.feat_params.R_Rc,
+            R_eta=self.feat_params.R_eta,
+            A_Rc=self.feat_params.A_Rc,
+            A_eta=self.feat_params.A_eta,
+            A_zeta=self.feat_params.A_zeta,
+            R_Rs=self.feat_params.R_Rs,
+            A_thetas=self.feat_params.A_thetas,
+            A_Rs=self.feat_params.A_Rs,
+        )
+        feat_size = self.feat_params.total_feature_size()
+        # feat_size = f0.op.get_attr("feature_size")
 
-                            with tf.device(tower_device):
-                                f0, f1, f2, f3 = ani_mod.featurize(
-                                    x_deq,
-                                    y_deq,
-                                    z_deq,
-                                    a_deq,
-                                    mol_offsets,
-                                    mol_atom_counts,
-                                    scatter_idxs,
-                                    atom_counts,
-                                    name="ani_op_"+str(tower_idx),
-                                    n_types=self.feat_params.n_types,
-                                    R_Rc=self.feat_params.R_Rc,
-                                    R_eta=self.feat_params.R_eta,
-                                    A_Rc=self.feat_params.A_Rc,
-                                    A_eta=self.feat_params.A_eta,
-                                    A_zeta=self.feat_params.A_zeta,
-                                    R_Rs=self.feat_params.R_Rs,
-                                    A_thetas=self.feat_params.A_thetas,
-                                    A_Rs=self.feat_params.A_Rs,
-                                )
-                                feat_size = self.feat_params.total_feature_size()
-                                # feat_size = f0.op.get_attr("feature_size")
+        # TODO: optimize in C++ code directly to avoid reshape
+        f0 = tf.reshape(f0, (-1, feat_size))
+        f1 = tf.reshape(f1, (-1, feat_size))
+        f2 = tf.reshape(f2, (-1, feat_size))
+        f3 = tf.reshape(f3, (-1, feat_size))
 
-                                # TODO: optimize in C++ code directly to avoid reshape
-                                f0 = tf.reshape(f0, (-1, feat_size))
-                                f1 = tf.reshape(f1, (-1, feat_size))
-                                f2 = tf.reshape(f2, (-1, feat_size))
-                                f3 = tf.reshape(f3, (-1, feat_size))
+        self.tower_features.append(tf.gather(
+            tf.concat([f0, f1, f2, f3], axis=0),
+            gather_idxs
+        ))
 
-                            self.tower_features.append(tf.gather(
-                                tf.concat([f0, f1, f2, f3], axis=0),
-                                gather_idxs
-                            ))
+        tower_model_near = MoleculeNN(
+            type_map=["H", "C", "N", "O"],
+            precision=precision,
+            atom_type_features=[f0, f1, f2, f3],
+            gather_idxs=gather_idxs,
+            layer_sizes=(feat_size,) + layer_sizes,
+            activation_fn=activation_fn,
+            prefix="near_")
 
-                            tower_model_near = MoleculeNN(
-                                type_map=["H", "C", "N", "O"],
-                                precision=precision,
-                                atom_type_features=[f0, f1, f2, f3],
-                                gather_idxs=gather_idxs,
-                                layer_sizes=(feat_size,) + layer_sizes,
-                                activation_fn=activation_fn,
-                                prefix="near_")
+        # avoid duplicate parameters from later towers since the variables are shared.
+        # if tower_idx == 0:
+            # self.parameters.extend(tower_model_near.get_parameters())
 
-                            # avoid duplicate parameters from later towers since the variables are shared.
-                            if tower_idx == 0:
-                                self.parameters.extend(tower_model_near.get_parameters())
+        self.all_models.append(tower_model_near)
+        tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
 
-                            self.all_models.append(tower_model_near)
-                            tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
+        if fit_charges:
+            assert 0
+            tower_model_charges = MoleculeNN(
+                type_map=["H", "C", "N", "O"],
+                atom_type_features=[f0, f1, f2, f3],
+                gather_idxs=gather_idxs,
+                layer_sizes=(feat_size,) + layer_sizes,
+                precision=precision,
+                prefix="charge_")
 
-                            # sum of softplus is still guaranteed to strictly greater than 0.
-                            tower_near_uncertainty = tf.segment_mean(tower_model_near.atom_uncertainties, m_deq)
-                            # uncertainty
-                            # layer_sizes[-1] += 1
+            if tower_idx == 0:
+                self.parameters.extend(tower_model_charges.get_parameters())
 
-                            if fit_charges:
-                                assert 0
-                                tower_model_charges = MoleculeNN(
-                                    type_map=["H", "C", "N", "O"],
-                                    atom_type_features=[f0, f1, f2, f3],
-                                    gather_idxs=gather_idxs,
-                                    layer_sizes=(feat_size,) + layer_sizes,
-                                    precision=precision,
-                                    prefix="charge_")
+            self.all_models.append(tower_model_charges)
+            tower_charges = tower_model_charges.atom_outputs
 
-                                if tower_idx == 0:
-                                    self.parameters.extend(tower_model_charges.get_parameters())
+            # (ytz + stevenso): we want to normalize the compute the charge per molecule
+            # note that this only works for *neutral* molecules. For molecules that have a formal charge
+            # we want to specify correct differently, or turn off the normalization entirely.
+            # tower_charges_per_mol = tf.segment_sum(tower_charges, m_deq) # per molecule charge
+            # tower_charges_per_mol = tf.divide(tower_charges_per_mol, tf.cast(mol_atom_counts, dtype=precision)) # per molecule avg charge
+            # tower_charge_correction = tf.gather(tower_charges_per_mol, m_deq) # generate the per atom correction
+            # tower_charges = tf.subtract(tower_charges, tower_charge_correction) # zero out the charge
 
-                                self.all_models.append(tower_model_charges)
-                                tower_charges = tower_model_charges.atom_outputs
+            tower_far_energy = ani_mod.ani_charge(
+                x_deq,
+                y_deq,
+                z_deq,
+                tower_charges,
+                mol_offsets,
+                mol_atom_counts
+            )
+            tower_pred = tf.add(tower_near_energy, tower_far_energy)
+        else:
+            tower_pred = tower_near_energy
 
-                                # (ytz + stevenso): we want to normalize the compute the charge per molecule
-                                # note that this only works for *neutral* molecules. For molecules that have a formal charge
-                                # we want to specify correct differently, or turn off the normalization entirely.
-                                # tower_charges_per_mol = tf.segment_sum(tower_charges, m_deq) # per molecule charge
-                                # tower_charges_per_mol = tf.divide(tower_charges_per_mol, tf.cast(mol_atom_counts, dtype=precision)) # per molecule avg charge
-                                # tower_charge_correction = tf.gather(tower_charges_per_mol, m_deq) # generate the per atom correction
-                                # tower_charges = tf.subtract(tower_charges, tower_charge_correction) # zero out the charge
+        self.tower_preds.append(tower_pred)
 
-                                tower_far_energy = ani_mod.ani_charge(
-                                    x_deq,
-                                    y_deq,
-                                    z_deq,
-                                    tower_charges,
-                                    mol_offsets,
-                                    mol_atom_counts
-                                )
-                                tower_pred = tf.add(tower_near_energy, tower_far_energy)
-                            else:
-                                tower_pred = tower_near_energy
 
-                            tf.get_variable_scope().reuse_variables()
+        tower_l2 = tf.squared_difference(tower_pred, labels)
+        self.tower_l2s.append(tower_l2)
+        tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
+        tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
 
-                            self.tower_preds.append(tower_pred)
-                            self.tower_pred_uncertainties.append(tower_near_uncertainty)
+        self.tower_exp_loss.append(tower_exp_loss)
 
-                            tower_l2 = tf.squared_difference(tower_pred, labels)
-                            self.tower_l2s.append(tower_l2)
-                            tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
-                            tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
+        tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
 
-                            self.tower_exp_loss.append(tower_exp_loss)
-                            tower_log_laplacian = tf.reduce_mean(tf.abs(tower_pred - labels)/tower_near_uncertainty) + \
-                                tf.reduce_mean(tf.log(tower_near_uncertainty))
+        p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
+        self.tower_coord_grads.append([p_dx, p_dy, p_dz])
 
-                            tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
+        # forces are the negative of the gradient
+        f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
 
-                            # tower_grad = self.optimizer.compute_gradients(tower_log_laplacian)
-                            self.tower_grads.append(tower_grad)
+        # optionally fit to the forces
+        dx_l2 = tf.pow(tf.expand_dims(f_dx, -1) - dx_deq, 2)
+        dy_l2 = tf.pow(tf.expand_dims(f_dy, -1) - dy_deq, 2)
+        dz_l2 = tf.pow(tf.expand_dims(f_dz, -1) - dz_deq, 2)
+        dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
+        dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
+        dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
 
-                            p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
-                            self.tower_coord_grads.append([p_dx, p_dy, p_dz])
-    
-                            # forces are the negative of the gradient
-                            f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
+        tower_force_rmse = dx_l2 + dy_l2 + dz_l2
+        self.tower_force_rmses.append(tower_force_rmse)
+        tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
 
-                            # optionally fit to the forces
-                            dx_l2 = tf.pow(tf.expand_dims(f_dx, -1) - dx_deq, 2)
-                            dy_l2 = tf.pow(tf.expand_dims(f_dy, -1) - dy_deq, 2)
-                            dz_l2 = tf.pow(tf.expand_dims(f_dz, -1) - dz_deq, 2)
-                            dx_l2 = tf.sqrt(tf.reduce_mean(dx_l2))
-                            dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
-                            dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
-                            # (todo): triple check that F = -grad(V)
-                            tower_force_rmse = dx_l2 + dy_l2 + dz_l2
-                            self.tower_force_rmses.append(tower_force_rmse)
-                            tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
-
-                            tower_force_grad = self.optimizer.compute_gradients(tower_force_exp_loss)
-                            self.tower_force_grads.append(tower_force_grad)
-
-            def tower_grads(grads):
-                # (jminuse+ytz: hard disabled for now)
-                # use_trust_radius = False
-                # if not use_trust_radius:
-                apply_gradient_op = self.optimizer.apply_gradients(average_gradients(grads), global_step=self.global_step)
-                # else:
-                #     grads, vs = zip(*average_gradients(grads))
-                #     trust_radius = 1e-4
-                #     grads, _ = tf.clip_by_global_norm(grads, trust_radius/self.learning_rate) # trust radius = max_gradient*learning_rate
-                #     apply_gradient_op = self.optimizer.apply_gradients(zip(grads,vs), global_step=self.global_step)
-                variable_averages = tf.train.ExponentialMovingAverage(0.9999, self.global_step)
-                variables_averages_op = variable_averages.apply(tf.trainable_variables())
-                return tf.group(apply_gradient_op, variables_averages_op)
-
-            self.train_op = tower_grads(self.tower_grads)
-            self.train_op_forces = tower_grads(self.tower_force_grads)
+        self.train_op = self.optimizer.minimize(tower_exp_loss)
+        self.train_op_forces = self.optimizer.minimize(tower_force_exp_loss)
 
         ws = self._weight_matrices()
         max_norm_ops = []
@@ -531,7 +499,6 @@ class TrainerMultiTower():
         self.max_norm_ops = max_norm_ops
 
         self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
-        #self.unordered_l2s += l2_norm_k * tf.norm(ws) # one way to enforce an l2 norm
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -815,36 +782,6 @@ class TrainerMultiTower():
             ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
         return ordered_ys
 
-    def predict_uncertainties(self, dataset, batch_size=2048):
-        """
-        Infer y-values given a dataset.
-
-        Parameters
-        ----------
-        dataset: khan.RawDataset
-            Dataset from which we predict from.
-
-        batch_size: int (optional)
-            Size of each batch used during prediction.
-
-        Returns
-        -------
-        list of floats
-            Returns a list of predicted [y0, y1, y2...] in the same order as the dataset Xs [x0, x1, x2...]
-
-        """
-        results = self.feed_dataset(
-            dataset,
-            shuffle=False,
-            target_ops=[self.tower_pred_uncertainties, self.tower_bids],
-            batch_size=batch_size
-        )
-        ordered_ys = []
-        for (ys, ids) in results:
-            sorted_ys = np.take(ys, np.argsort(ids), axis=0)
-            ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
-        return ordered_ys
-
     def eval_rel_rmse(self, dataset, group_ys, batch_size=1024):
         """
         Evaluates the relative RMSE in kcal/mols of the y-values given dataset.
@@ -1096,3 +1033,8 @@ class TrainerMultiTower():
             #batch_size += 16
             self.sess.run(tf.assign(self.global_epoch_count, global_epoch)) # because this gets wiped out during numpy load
 
+class TrainerMultiTower(Trainer):
+
+    def __init__(self, args, **kwargs):
+        warnings.warn("TrainerMultiTower is deprecated. Please use Trainer class in the future.", UserWarning)
+        super().__init__(args, **kwargs)
