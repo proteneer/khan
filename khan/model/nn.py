@@ -20,8 +20,14 @@ class AtomNN():
         precision: tf.dtype
             Should be either tf.float32 or tf.float64        
 
+        activation_fn: tf function
+            Examples are tf.nn.relu, or other functions in activations.py
+
         atom_type: str
-            The type of atom we're 
+            The type of atom we're consdering
+
+        prefix: str
+            A prefix we append to the beginning of the variable names
 
         """
         assert (precision is tf.float32) or (precision is tf.float64)
@@ -114,6 +120,13 @@ class MoleculeNN():
 
         layer_sizes: list of ints
             See documentation of AtomNN for details.
+
+        activation_fn: tf function
+            Examples are tf.nn.relu, or other functions in activations.py
+
+        prefix: str
+            A prefix we append to the beginning of the variable names
+
 
         """
 

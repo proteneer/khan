@@ -5,7 +5,7 @@ import tensorflow as tf
 import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module, FeaturizationParameters
+from khan.training.trainer_multi_tower import Trainer, flatten_results, initialize_module, FeaturizationParameters
 from khan.model import activations
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL
@@ -57,7 +57,7 @@ def main():
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
-    batch_size = 1024
+    batch_size = 256
 
     config = tf.ConfigProto(
         allow_soft_placement=True, 
@@ -105,7 +105,7 @@ def main():
             # A_Rs=(5.0000000e-01,1.1500000e+00,1.8000000e+00,2.4500000e+00)
         #)
 
-        trainer = TrainerMultiTower(
+        trainer = Trainer(
             sess,
             towers=towers,
             precision=tf.float32,
@@ -143,13 +143,15 @@ def main():
         # Uncomment if you'd like to inspect the gradients
         all_grads = []
         # for feat in trainer.featurize(rd_test):
-            # np.save('debug',feat)
-            # assert 0
-            # all_grads.append(grad)
+        #     np.save('debug',feat)
+        #     assert 0
+        #     all_grads.append(grad)
 
         # all_grads = []
         # for grad in trainer.coordinate_gradients(rd_test):
         #     all_grads.append(grad)
+
+        # print(all_grads)
         # assert len(all_grads) == rd_test.num_mols()
 
         print("------------Starting Training--------------")
