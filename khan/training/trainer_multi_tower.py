@@ -26,8 +26,6 @@ ani_mod = None
 def _feat_grad(op, grad_hs, grad_cs, grad_ns, grad_os):
     x,y,z,a,mo,macs,sis,acs = op.inputs
 
-    # print(dir(op))
-    # assert 0
     dx, dy, dz = ani_mod.featurize_grad(
         x,
         y,
@@ -241,7 +239,6 @@ class Trainer():
 
     def __init__(self,
         sess,
-        towers,
         precision,
         layer_sizes=(128, 128, 64, 8, 1),
         activation_fn=activations.waterslide,
@@ -263,16 +260,12 @@ class Trainer():
             Whether or not we fit partial charges
 
         precision: tf.dtype
-            Should be either tf.float32 or tf.float64
+            Should be either tf.float32 or tf.float64. Note that 64-bit precision is significantly slower than 32-bit.
 
         """
-        self.towers = towers
-        self.num_towers = len(towers)
 
         assert fit_charges is False
         assert (precision is tf.float32) or (precision is tf.float64)
-        if self.num_towers > 0:
-            warnings.warn("towers is deprecated and ignored, and will be removed in a future version.", UserWarning)
 
         self.precision = precision
         self.feat_params = featurization_parameters
@@ -282,7 +275,6 @@ class Trainer():
         self.a_enq = tf.placeholder(dtype=tf.int32)
         self.m_enq = tf.placeholder(dtype=tf.int32)
         self.yt_enq = tf.placeholder(dtype=precision)
-        self.bi_enq = tf.placeholder(dtype=tf.int32)
 
         dtypes=[
             precision,  # Xs
@@ -290,8 +282,7 @@ class Trainer():
             precision,  # Zs
             tf.int32,   # As
             tf.int32,   # mol ids
-            precision,  # Y TRUEss
-            tf.int32,   # b_idxs
+            precision,  # Y TRUEs
         ]
 
         qtypes = [
@@ -301,7 +292,6 @@ class Trainer():
             self.a_enq,
             self.m_enq,
             self.yt_enq,
-            self.bi_enq,
         ]
 
         # force fitting
@@ -311,13 +301,12 @@ class Trainer():
         dtypes.extend([precision, precision, precision])
         qtypes.extend([self.force_enq_x, self.force_enq_y, self.force_enq_z])
 
-        queue = tf.FIFOQueue(capacity=20*self.num_towers, dtypes=dtypes);
+        queue = tf.FIFOQueue(capacity=40, dtypes=dtypes);
 
         self.put_op = queue.enqueue(qtypes)
         self.sess = sess
         self.non_trainable_variables = []
 
-        # with tf.device('/cpu:0'):
         self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
         self.optimizer = NadamOptimizer(
                 learning_rate=self.learning_rate,
@@ -333,44 +322,22 @@ class Trainer():
         self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
         self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
 
-        # these data elements are unordered since the gpu grabs the batches in different orders
-        self.tower_xs = []
-        self.tower_ys = []
-        self.tower_zs = []
-        self.tower_ms = []
-        self.tower_grads = [] # average is order invariant
-        self.tower_force_grads = [] # yell at yutong for naming this
-        self.tower_preds = []
-        self.tower_bids = []
-        self.tower_l2s = []
-        self.tower_mos = []
-        self.tower_coord_grads = []
-        self.tower_features = []
-        self.tower_norms = []
-        self.all_models = []
-        self.tower_exp_loss = []
-        self.tower_force_rmses = []
-        # self.tower_log_laplacians = []
-        self.parameters = []
-        self.tower_feat_grads = []
-
-        # with tf.device('/cpu:0'):
         get_op = queue.dequeue()
-        x_deq, y_deq, z_deq, a_deq, m_deq, labels, bi_deq = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
-        self.tower_xs.append(x_deq)
-        self.tower_ys.append(y_deq)
-        self.tower_zs.append(z_deq)
-        self.tower_ms.append(m_deq)
+        # bi_deq is not used, we can 
+        x_deq, y_deq, z_deq, a_deq, m_deq, labels = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]
+        self.xs = x_deq
+        self.ys = y_deq
+        self.zs = z_deq
+        self.ms = m_deq
 
-        dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
+        dx_deq, dy_deq, dz_deq = get_op[6], get_op[7], get_op[8]
 
-        self.tower_bids.append(bi_deq)
         mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
         scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
 
-        self.tower_mos.append(mol_offsets)
+        self.mos = mol_offsets
 
         # with tf.device(tower_device):
         f0, f1, f2, f3 = ani_mod.featurize(
@@ -402,12 +369,14 @@ class Trainer():
         f2 = tf.reshape(f2, (-1, feat_size))
         f3 = tf.reshape(f3, (-1, feat_size))
 
-        self.tower_features.append(tf.gather(
+        self.features = tf.gather(
             tf.concat([f0, f1, f2, f3], axis=0),
             gather_idxs
-        ))
+        )
 
-        tower_model_near = MoleculeNN(
+
+
+        model_near = MoleculeNN(
             type_map=["H", "C", "N", "O"],
             precision=precision,
             atom_type_features=[f0, f1, f2, f3],
@@ -416,12 +385,14 @@ class Trainer():
             activation_fn=activation_fn,
             prefix="near_")
 
+        self.models = [model_near]
+
         # avoid duplicate parameters from later towers since the variables are shared.
         # if tower_idx == 0:
-            # self.parameters.extend(tower_model_near.get_parameters())
+            # self.parameters.extend(model_near.get_parameters())
 
-        self.all_models.append(tower_model_near)
-        tower_near_energy = tf.segment_sum(tower_model_near.atom_outputs, m_deq)
+        # self.all_models.append(model_near)
+        tower_near_energy = tf.segment_sum(model_near.atom_outputs, m_deq)
 
         if fit_charges:
             assert 0
@@ -436,7 +407,7 @@ class Trainer():
             if tower_idx == 0:
                 self.parameters.extend(tower_model_charges.get_parameters())
 
-            self.all_models.append(tower_model_charges)
+            self.models.append(tower_model_charges)
             tower_charges = tower_model_charges.atom_outputs
 
             # (ytz + stevenso): we want to normalize the compute the charge per molecule
@@ -455,29 +426,23 @@ class Trainer():
                 mol_offsets,
                 mol_atom_counts
             )
-            tower_pred = tf.add(tower_near_energy, tower_far_energy)
+            self.energies = tf.add(tower_near_energy, tower_far_energy)
         else:
-            tower_pred = tower_near_energy
+            self.energies = tower_near_energy
 
-        self.tower_preds.append(tower_pred)
+        self.l2s = tf.squared_difference(self.energies, labels) # l2 of the batch
+        self.rmse = tf.sqrt(tf.reduce_mean(self.l2s)) # rmse of the batch
+        self.exp_loss = tf.exp(tf.cast(self.rmse, dtype=tf.float64))
+        self.grads = self.optimizer.compute_gradients(self.exp_loss)
 
-
-        tower_l2 = tf.squared_difference(tower_pred, labels)
-        self.tower_l2s.append(tower_l2)
-        tower_rmse = tf.sqrt(tf.reduce_mean(tower_l2))
-        tower_exp_loss = tf.exp(tf.cast(tower_rmse, dtype=tf.float64))
-
-        self.tower_exp_loss.append(tower_exp_loss)
-
-        tower_grad = self.optimizer.compute_gradients(tower_exp_loss)
-
-        p_dx, p_dy, p_dz = tf.gradients(tower_pred, [x_deq, y_deq, z_deq])
-        self.tower_coord_grads.append([p_dx, p_dy, p_dz])
+        # compute derivatives of energy with respect to coordinates
+        p_dx, p_dy, p_dz = tf.gradients(self.energies, [self.xs, self.ys, self.zs])
+        self.coord_grads = [p_dx, p_dy, p_dz]
 
         # forces are the negative of the gradient
         f_dx, f_dy, f_dz = -p_dx, -p_dy, -p_dz
 
-        # optionally fit to the forces
+        # optionally we can fit to the forces
         dx_l2 = tf.pow(tf.expand_dims(f_dx, -1) - dx_deq, 2)
         dy_l2 = tf.pow(tf.expand_dims(f_dy, -1) - dy_deq, 2)
         dz_l2 = tf.pow(tf.expand_dims(f_dz, -1) - dz_deq, 2)
@@ -485,12 +450,11 @@ class Trainer():
         dy_l2 = tf.sqrt(tf.reduce_mean(dy_l2))
         dz_l2 = tf.sqrt(tf.reduce_mean(dz_l2))
 
-        tower_force_rmse = dx_l2 + dy_l2 + dz_l2
-        self.tower_force_rmses.append(tower_force_rmse)
-        tower_force_exp_loss = tf.exp(tf.cast(tower_force_rmse, dtype=tf.float64))
+        self.force_rmses = dx_l2 + dy_l2 + dz_l2
+        self.force_exp_loss = tf.exp(tf.cast(self.force_rmses, dtype=tf.float64))
 
-        self.train_op = self.optimizer.minimize(tower_exp_loss)
-        self.train_op_forces = self.optimizer.minimize(tower_force_exp_loss)
+        self.train_op = self.optimizer.minimize(self.exp_loss)
+        self.train_op_forces = self.optimizer.minimize(self.force_exp_loss)
 
         ws = self._weight_matrices()
         max_norm_ops = []
@@ -498,7 +462,7 @@ class Trainer():
             max_norm_ops.append(tf.assign(w, tf.clip_by_norm(w, 4.0, axes=1)))
         self.max_norm_ops = max_norm_ops
 
-        self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
+        # self.unordered_l2s = tf.squeeze(tf.concat(self.tower_l2s, axis=0))
 
         self.global_initializer_op = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -577,6 +541,9 @@ class Trainer():
             be created automatically.
 
         """
+
+        warnings.warn("save() is deprecated due to portability concerns, use save_numpy() instead.", UserWarning)
+
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         save_path = os.path.join(save_dir, "model.ckpt")
@@ -596,22 +563,27 @@ class Trainer():
         .. note:: It is expected that this directory exists.
 
         """
+        
+        warnings.warn("load() is deprecated due to portability concerns, use load_numpy() instead.", UserWarning)
+
         save_path = os.path.join(save_dir, "model.ckpt")
         self.saver.restore(self.sess, save_path)
 
     def _weight_matrices(self):
         weights = []
         # vars are always shared so we can just grab them by the first tower
-        for ann in self.all_models[0].anns:
-            for W in ann.Ws:
-                weights.append(W)
+        for model in self.models:
+            for ann in model.anns:
+                for W in ann.Ws:
+                    weights.append(W)
         return weights
 
     def _biases(self):
         biases = []
-        for ann in self.all_models[0].anns:
-            for b in ann.bs:
-                biases.append(b)
+        for model in self.models:
+            for ann in model.anns:
+                for b in ann.bs:
+                    biases.append(b)
         return biases
 
     def get_train_op_rmse(self):
@@ -642,12 +614,43 @@ class Trainer():
 
         """
         # Todo: add support for force errors.
-        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.unordered_l2s], batch_size=batch_size)
+        test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2s], batch_size=batch_size)
         return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
+
+    def segment_results(self, operator, dataset, batch_size=1024):
+        """
+        Segment results takes a graph op that is concatenated into a batch of mols and segments it into the expected shape.
+
+        Parameters
+        ----------
+        operator: tf op
+            A given operation
+
+        Returns
+        -------
+        list of results
+            returns a list of results for every individual molecule in the dataset.
+
+        """
+        results = self.feed_dataset(dataset, shuffle=False, target_ops=[operator, self.mos], batch_size=batch_size)
+
+        for (batched_obj, mo) in results:
+
+            batched_obj_x, batched_obj_y, batched_obj_z = batched_obj
+
+            mo = mo[1:] # mol offsets always start at zero, which form a 0-size list on split.
+
+            gx = np.split(batched_obj_x, mo)
+            gy = np.split(batched_obj_y, mo)
+            gz = np.split(batched_obj_z, mo)
+
+            for x,y,z in zip(gx, gy, gz):
+                grad_xyz = np.vstack([x,y,z]).transpose()
+                yield grad_xyz
 
     def coordinate_gradients(self, dataset, batch_size=1024):
         """
-        Compute gradients with respect to the (x,y,z) coordinates of a dataset.
+        Compute analytic gradients with respect to the (x,y,z) coordinates of a dataset. The force is defined as the negative of what this returns.
 
         Parameters
         ----------
@@ -663,44 +666,7 @@ class Trainer():
             Returns a list of num_atoms x 3 gradients for each molecule
 
         """
-        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_coord_grads, self.tower_mos, self.tower_bids], batch_size=batch_size)
-
-        for (grad, mo, tids) in results:
-            bidxs = np.argsort(tids)
-            sorted_grads = np.take(grad, bidxs, axis=0)
-
-            if np.any(np.isnan(grad)):
-                print("MAJOR GRAD DEBUG")
-                assert 0
-
-            sorted_mos = np.take(mo, bidxs, axis=0)
-
-            for (mo, grad_all) in zip(sorted_mos, sorted_grads):
-                # mo is an exclusive prefix sum so the first element is zero
-                mo = mo[1:]
-                grad_x, grad_y, grad_z = grad_all
-                if np.any(np.isnan(grad_x)):
-                    print("FATAL NAN FOUND IN X")
-                    print(grad_x)
-                    assert 0
-
-                if np.any(np.isnan(grad_y)):
-                    print("FATAL NAN FOUND IN Y")
-                    print(grad_y)
-                    assert 0
-
-                if np.any(np.isnan(grad_z)):
-                    print("FATAL NAN FOUND IN Z")
-                    print(grad_z)
-                    assert 0
-
-                grad_xs = np.split(grad_x, mo)
-                grad_ys = np.split(grad_y, mo)
-                grad_zs = np.split(grad_z, mo)
-                for x,y,z in zip(grad_xs, grad_ys, grad_zs):
-                    grad_xyz = np.vstack([x,y,z]).transpose()
-                    yield grad_xyz
-
+        return self.segment_results(self.coord_grads, dataset, batch_size)
 
     def featurize(self, dataset, batch_size=1024):
         """
@@ -724,20 +690,8 @@ class Trainer():
             extremely large in size (hint: 600GB if iterating over gdb8 dataset)
 
         """
+        return self.segment_results(self.features, dataset, batch_size)
 
-        results = self.feed_dataset(dataset, shuffle=False, target_ops=[self.tower_features, self.tower_mos, self.tower_bids], batch_size=batch_size)
-
-        for (feats, mos, tids) in results:
-            bidxs = np.argsort(tids)
-            sorted_mos = np.take(mos, bidxs, axis=0)
-            sorted_feats = np.take(feats, bidxs, axis=0)
-
-            for (mo, feat) in zip(sorted_mos, sorted_feats):
-                # mo is an exclusive prefix sum so the first element is zero
-                mo = mo[1:]
-                feats = np.split(feat, mo)
-                for f in feats:
-                    yield f
 
 
     def predict(self, dataset, batch_size=2048):
@@ -765,17 +719,6 @@ class Trainer():
             batch_size=batch_size
         )
 
-        # ordered_ys = []
-        # for (ys, ids) in results:
-        #     # sorted_ys = np.take(ys, np.argsort(ids), axis=0)
-        #     ordered_ys.extend(ys)
-        # for r in ordered_ys:
-        #     print(r.shape)
-        # all_ys = np.concatenate(ordered_ys)
-        # return all_ys
-
-
-        # todo: fix
         ordered_ys = []
         for (ys, ids) in results:
             sorted_ys = np.take(ys, np.argsort(ids), axis=0)
@@ -851,24 +794,15 @@ class Trainer():
 
         """
 
+        n_batches = dataset.num_batches(batch_size)
+
         def submitter():
 
             accum = 0
             g_b_idx = 0
 
-            # suppose we have 4 gpus and 5 batches
-            # the distribution schedule is as follows:
-            # gpu   0 1 2 3
-            # bid0  1 1 1 1
-            # bid1  1 0 0 0
-
-            # suppose we have 3 gpus and 5 batches
-            # the distribution schedule is as follows:
-            # gpu   0 1 2
-            # bid0  1 1 1
-            # bid1  1 1 0
             try:
-                n_batches = dataset.num_batches(batch_size)
+
                 for b_idx, (mol_xs, mol_idxs, mol_yts, mol_grads) in enumerate(dataset.iterate(batch_size=batch_size, shuffle=shuffle, fuzz=fuzz)):
                     atom_types = (mol_xs[:, 0]).astype(np.int32)
                     if before_hooks:
@@ -880,8 +814,7 @@ class Trainer():
                         self.z_enq: mol_xs[:, 3],
                         self.a_enq: atom_types,
                         self.m_enq: mol_idxs,
-                        self.yt_enq: mol_yts,
-                        self.bi_enq: b_idx
+                        self.yt_enq: mol_yts
                     }
 
                     if mol_grads is not None:
@@ -899,29 +832,6 @@ class Trainer():
                     g_b_idx += 1
 
                 # division across multiple towers
-                remainder = n_batches % self.num_towers
-                if remainder:
-                    for _ in range(self.num_towers - remainder):
-                        if before_hooks:
-                            self.sess.run(before_hooks)
-
-                        feed_dict = {
-                            self.x_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
-                            self.y_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
-                            self.z_enq: np.zeros((0, 1), dtype=self.precision.as_numpy_dtype),
-                            self.a_enq: np.zeros((0,), dtype=np.int32),
-                            self.m_enq: np.zeros((0,), dtype=np.int32),
-                            self.yt_enq: np.zeros((0,)),
-                            self.bi_enq: b_idx,
-                        }
-
-                        feed_dict[self.force_enq_x] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
-                        feed_dict[self.force_enq_y] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
-                        feed_dict[self.force_enq_z] = np.zeros((0, 1), dtype=self.precision.as_numpy_dtype)
-
-                        # print("feeding remainder")
-                        self.sess.run(self.put_op, feed_dict=feed_dict)
-                        b_idx += 1
 
             except Exception as e:
                 print("QueueError:", e)
@@ -930,9 +840,7 @@ class Trainer():
         executor = ThreadPoolExecutor(4)
         executor.submit(submitter)
 
-        n_tower_batches = -(-dataset.num_batches(batch_size=batch_size) // self.num_towers)
-
-        for i in range(n_tower_batches):
+        for i in range(n_batches):
             yield self.sess.run(target_ops)
 
     # run the actual training
@@ -944,7 +852,7 @@ class Trainer():
             self.global_epoch_count,
             self.learning_rate,
             self.local_epoch_count,
-            self.unordered_l2s,
+            self.l2s,
             self.train_op
         ]
         start_time = time.time()
