@@ -60,9 +60,9 @@ def get_all_fn_names():
 # to strip out utility functions.
 
 def celu(A, alpha=0.1):
-    posA = tf.cast(tf.greater_equal(A, 0), A.dtype) * A
-    negA = tf.cast(tf.less(A, 0), A.dtype) * A
-    return posA + alpha * (tf.exp(negA/alpha) - 1)
+    # tensorflow's elu function thankfully doesn't implement the alpha multiplier before the elu
+    # so it's trivial to implement celu using an elu without having to implement a slow switch function
+    return alpha*tf.nn.elu(A/alpha)
 
 def normal(A, mean=0.0, std=1.0):
     return tf.exp(-tf.pow((A - mean)/std, 2)/2.0)

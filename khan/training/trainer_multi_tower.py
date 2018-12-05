@@ -336,10 +336,8 @@ class Trainer():
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
 
         scatter_idxs, gather_idxs, atom_counts = ani_mod.ani_sort(a_deq)
-
         self.mos = mol_offsets
 
-        # with tf.device(tower_device):
         f0, f1, f2, f3 = ani_mod.featurize(
             x_deq,
             y_deq,
@@ -373,8 +371,6 @@ class Trainer():
             tf.concat([f0, f1, f2, f3], axis=0),
             gather_idxs
         )
-
-
 
         model_near = MoleculeNN(
             type_map=["H", "C", "N", "O"],
@@ -541,7 +537,6 @@ class Trainer():
             be created automatically.
 
         """
-
         warnings.warn("save() is deprecated due to portability concerns, use save_numpy() instead.", UserWarning)
 
         if not os.path.exists(save_dir):
@@ -693,7 +688,6 @@ class Trainer():
         return self.segment_results(self.features, dataset, batch_size)
 
 
-
     def predict(self, dataset, batch_size=2048):
         """
         Infer y-values given a dataset.
@@ -827,11 +821,8 @@ class Trainer():
                         feed_dict[self.force_enq_y] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
                         feed_dict[self.force_enq_z] = np.zeros((num_mols, 0), dtype=self.precision.as_numpy_dtype)
 
-                    # print("feeding non-remainder")
                     self.sess.run(self.put_op, feed_dict=feed_dict)
                     g_b_idx += 1
-
-                # division across multiple towers
 
             except Exception as e:
                 print("QueueError:", e)
@@ -944,5 +935,4 @@ class Trainer():
 class TrainerMultiTower(Trainer):
 
     def __init__(self, args, **kwargs):
-        warnings.warn("TrainerMultiTower is deprecated. Please use Trainer class in the future.", UserWarning)
-        super().__init__(args, **kwargs)
+        raise Exception("Multiple towers are no longer supported. Please use the Trainer class in the future.")

@@ -88,7 +88,7 @@ def main():
         activation_fn = activations.celu # preferred
         # activation_fn = activations.waterslide
         # activation_fn = tf.nn.relu
-        # activation_fn = tf.nn.selu
+        # activation_fn = tf.nn.elu
         # activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
         # activation_fn = activations.get_fn_by_name("normal", 0.5, 0.2)
 

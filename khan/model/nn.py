@@ -41,37 +41,25 @@ class AtomNN():
 
         self.atom_type = atom_type
 
-        interception_count = 2
-
-        # self.alpha = tf.get_variable(prefix+'_'+atom_type+'_alpha', tuple(), tf.float32, tf.constant_initializer(0.1), trainable=False)
-
         for idx in range(1, len(layer_sizes)):
+
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
-            # print('Layer', idx, 'input/output size', x, y)
-            name = "_"+atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
+            name = atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            W = tf.get_variable(
-                prefix+"W"+name,
-                (x, y),
-                precision,
-                #tf.truncated_normal_initializer(mean=0, stddev=1.0/x**0.5), #(1.0/x**0.5 if idx<len(layer_sizes)-1 else 0.01/x**0.5) ),
-                tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
-                trainable=True
-            )
-            b = tf.get_variable(
-                prefix+"b"+name,
-                (y),
-                precision,
-                tf.zeros_initializer,
-                trainable=True
-            )
-
-            A = tf.matmul(self.As[-1], W) + b
             if idx != len(layer_sizes) - 1:
-                A = activation_fn(A)
+                activation = activation_fn
+            else:
+                activation = None
 
-            self.Ws.append(W)
-            self.bs.append(b)
+            A = tf.layers.dense(
+                inputs=self.As[-1],
+                units=y,
+                use_bias=True,
+                activation=activation,
+                kernel_initializer=tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
+                kernel_regularizer=tf.keras.regularizers.l2(),
+                name=name)
+
             self.As.append(A)
 
     def get_parameters(self):
