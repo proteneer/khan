@@ -57,13 +57,15 @@ def main():
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
-    batch_size = 256
+    batch_size = 256 # 1024 is optimal
 
     config = tf.ConfigProto(
         allow_soft_placement=True, 
         log_device_placement=False
     )
 
+
+    config.gpu_options.allow_growth = True
     # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.OFF
 
     with tf.Session(config=config) as sess:
@@ -86,7 +88,7 @@ def main():
         activation_fn = activations.celu # preferred
         # activation_fn = activations.waterslide
         # activation_fn = tf.nn.relu
-        # activation_fn = tf.nn.selu
+        # activation_fn = tf.nn.elu
         # activation_fn = functools.partial(tf.nn.leaky_relu, alpha=0.2)
         # activation_fn = activations.get_fn_by_name("normal", 0.5, 0.2)
 
@@ -107,10 +109,9 @@ def main():
 
         trainer = Trainer(
             sess,
-            towers=towers,
             precision=tf.float32,
             # layer_sizes=(128, 128, 128, 64, 64, 64, 1),
-            layer_sizes=(258, 128, 64, 1),
+            layer_sizes=(256, 128, 64, 1),
             activation_fn=activation_fn,
             fit_charges=False,
         )
@@ -124,13 +125,13 @@ def main():
                 os.makedirs(ANI_SAVE_DIR)
             trainer.initialize() # initialize to random variables
 
-        max_local_epoch_count = 100
+        max_local_epoch_count = 20
 
         train_ops = [
             trainer.global_epoch_count,
             trainer.learning_rate,
             trainer.local_epoch_count,
-            trainer.unordered_l2s,
+            trainer.l2s,
             trainer.train_op,
         ]
 
@@ -141,14 +142,13 @@ def main():
         best_test_score = trainer.eval_abs_rmse(rd_test)
 
         # Uncomment if you'd like to inspect the gradients
-        all_grads = []
         # for feat in trainer.featurize(rd_test):
         #     np.save('debug',feat)
         #     assert 0
-        #     all_grads.append(grad)
 
         # all_grads = []
         # for grad in trainer.coordinate_gradients(rd_test):
+        #     print(grad)
         #     all_grads.append(grad)
 
         # print(all_grads)
@@ -162,24 +162,13 @@ def main():
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
-                # sess.run(trainer.max_norm_ops) # should this run after every batch instead?
-
-                # norm_results = list(trainer.feed_dataset(
-                #     rd_train,
-                #     shuffle=True,
-                #     target_ops=trainer.tower_norms,
-                #     batch_size=batch_size))
-
-                # print(norm_results)
-                # assert 0
-
                 start_time = time.time()
                 train_results = list(trainer.feed_dataset(
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
-                    batch_size=batch_size,
-                    before_hooks=trainer.max_norm_ops))
+                    batch_size=batch_size, # 20% speed up
+                    before_hooks=None)) # can replace with trainer.max_norm_ops for regularization, but 20% slower to train
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time
@@ -187,19 +176,16 @@ def main():
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
 
-                # print("tower_g_norm", train_results[-1])
-
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test)
                 print(time.strftime("%Y-%m-%d %H:%M:%S"), 'tpe:', "{0:.2f}s,".format(time_per_epoch), 'g-epoch', global_epoch, 'l-epoch', local_epoch_count, 'lr', "{0:.0e}".format(learning_rate), \
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
-                # if test_abs_rmse < best_test_score:
-                #     gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                #     print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                if test_abs_rmse < best_test_score:
+                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
 
-                #     best_test_score = test_abs_rmse
-                #     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
-                # else:
+                    best_test_score = test_abs_rmse
+                    sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
 
                 sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
