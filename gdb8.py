@@ -84,7 +84,8 @@ def main():
         print("Soft placing operations onto towers:", towers)
 
         # activation_fn = activations.get_fn_by_name("celu") # if you want to use the command line.
-        activation_fn = activations.celu # preferred
+        # activation_fn = activations.celu # preferred
+        activation_fn = functools.partial(activations.celu, alpha=0.1)
         # activation_fn = activations.waterslide
         # activation_fn = tf.nn.relu
         # activation_fn = tf.nn.elu
