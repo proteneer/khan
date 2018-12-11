@@ -59,7 +59,7 @@ def get_all_fn_names():
 # get_ string. This prefix is used by the get_all_activation_fn_names
 # to strip out utility functions.
 
-def celu(A, alpha=0.1):
+def celu(A, alpha=0.5):
     # tensorflow's elu function thankfully doesn't implement the alpha multiplier before the elu
     # so it's trivial to implement celu using an elu without having to implement a slow switch function
     return alpha*tf.nn.elu(A/alpha)

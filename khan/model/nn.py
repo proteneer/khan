@@ -3,7 +3,7 @@ import numpy as np
 
 class AtomNN():
 
-    def __init__(self, features, layer_sizes, precision, activation_fn, atom_type="", prefix=""):
+    def __init__(self, features, layer_sizes, precision, activation_fn, dropout_rate, atom_type="", prefix=""):
         """
         Construct a Neural Network used to compute energies of atoms.
 
@@ -22,6 +22,10 @@ class AtomNN():
 
         activation_fn: tf function
             Examples are tf.nn.relu, or other functions in activations.py
+
+        dropout_rate: tf.float32 variable
+            Dropout rate determining how often we deactivate neurons. Note that this must be in
+            the range [0, 1). 
 
         atom_type: str
             The type of atom we're consdering
@@ -51,8 +55,10 @@ class AtomNN():
             else:
                 activation = None
 
+            input_layer = tf.layers.dropout(self.As[-1], rate=dropout_rate)
+
             A = tf.layers.dense(
-                inputs=self.As[-1],
+                inputs=input_layer,
                 units=y,
                 use_bias=True,
                 activation=activation,
@@ -87,6 +93,7 @@ class MoleculeNN():
         layer_sizes,
         precision,
         activation_fn,
+        dropout_rate,
         prefix):
         """
         Construct a molecule neural network that can predict energies of batches of molecules.
@@ -112,9 +119,12 @@ class MoleculeNN():
         activation_fn: tf function
             Examples are tf.nn.relu, or other functions in activations.py
 
+        dropout_rate: tf.float32 variable
+            Dropout rate determining how often we deactivate neurons. Note that this must be in
+            the range [0, 1).
+
         prefix: str
             A prefix we append to the beginning of the variable names
-
 
         """
 
@@ -124,8 +134,14 @@ class MoleculeNN():
         self.anns = []
 
         for type_idx, atom_type in enumerate(type_map):
-            ann = AtomNN(atom_type_features[type_idx], layer_sizes, precision, activation_fn,
-                atom_type=atom_type, prefix=prefix)
+            ann = AtomNN(
+                atom_type_features[type_idx],
+                layer_sizes,
+                precision,
+                activation_fn,
+                dropout_rate,
+                atom_type=atom_type,
+                prefix=prefix)
             self.anns.append(ann)
 
             atom_type_nrgs.append(ann.atom_energies())
