@@ -51,7 +51,7 @@ def main():
 
     all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
 
-    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.01) # stratify by UTT would be good to try here
+    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
     rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
