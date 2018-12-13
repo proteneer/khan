@@ -57,13 +57,12 @@ def main():
     X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
     rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
-    batch_size = 256 # 1024 is optimal
+    batch_size = 1024 # 1024 is optimal
 
     config = tf.ConfigProto(
-        allow_soft_placement=True, 
+        allow_soft_placement=True,
         log_device_placement=False
     )
-
 
     config.gpu_options.allow_growth = True
     # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.OFF
@@ -85,7 +84,8 @@ def main():
         print("Soft placing operations onto towers:", towers)
 
         # activation_fn = activations.get_fn_by_name("celu") # if you want to use the command line.
-        activation_fn = activations.celu # preferred
+        # activation_fn = activations.celu # preferred
+        activation_fn = functools.partial(activations.celu, alpha=0.1)
         # activation_fn = activations.waterslide
         # activation_fn = tf.nn.relu
         # activation_fn = tf.nn.elu
@@ -111,7 +111,7 @@ def main():
             sess,
             precision=tf.float32,
             # layer_sizes=(128, 128, 128, 64, 64, 64, 1),
-            layer_sizes=(256, 128, 64, 1),
+            layer_sizes=(256, 256, 1),
             activation_fn=activation_fn,
             fit_charges=False,
         )
@@ -168,6 +168,7 @@ def main():
                     shuffle=True,
                     target_ops=train_ops,
                     batch_size=batch_size, # 20% speed up
+                    dropout_rate=0.5,
                     before_hooks=None)) # can replace with trainer.max_norm_ops for regularization, but 20% slower to train
 
                 global_epoch = train_results[0][0]

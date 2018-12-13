@@ -276,6 +276,7 @@ class Trainer():
         self.m_enq = tf.placeholder(dtype=tf.int32)
         self.yt_enq = tf.placeholder(dtype=precision)
 
+
         dtypes=[
             precision,  # Xs
             precision,  # Ys
@@ -314,6 +315,7 @@ class Trainer():
                 beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
                 epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
 
+        self.dropout_rate = tf.get_variable('dropout_rate', tuple(), tf.float32, tf.constant_initializer(0), trainable=False)
         self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
         self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
         self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
@@ -378,6 +380,7 @@ class Trainer():
             atom_type_features=[f0, f1, f2, f3],
             gather_idxs=gather_idxs,
             layer_sizes=(feat_size,) + layer_sizes,
+            dropout_rate=self.dropout_rate,
             activation_fn=activation_fn,
             prefix="near_")
 
@@ -754,6 +757,7 @@ class Trainer():
         shuffle,
         target_ops,
         batch_size,
+        dropout_rate=0.0,
         fuzz=None,
         before_hooks=None):
         """
@@ -772,6 +776,10 @@ class Trainer():
 
         batch_size: int
             Size of the batch for which we iterate the dataset over.
+
+        dropout_rate: float32
+            How often we do dropout. Note that this should be set to zero for inference, and
+            between [0, 1) for training.
 
         hooks: list of tf.Ops
             List of tensorflow ops which we run before every batch. Note that currently
@@ -808,7 +816,8 @@ class Trainer():
                         self.z_enq: mol_xs[:, 3],
                         self.a_enq: atom_types,
                         self.m_enq: mol_idxs,
-                        self.yt_enq: mol_yts
+                        self.yt_enq: mol_yts,
+                        self.dropout_rate: dropout_rate
                     }
 
                     if mol_grads is not None:
