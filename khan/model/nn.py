@@ -50,23 +50,35 @@ class AtomNN():
             x, y = layer_sizes[idx-1], layer_sizes[idx] # input/output
             name = atom_type+"_"+str(x)+"x"+str(y)+"_l"+str(idx)
 
-            if idx != len(layer_sizes) - 1:
-                activation = activation_fn
-            else:
-                activation = None
+            W = tf.get_variable(
+                prefix+"W"+name,
+                (x, y),
+                precision,
+                tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5), # maybe a better spread of params without truncation - bad to have any the same, because symmetry could make networks hard to train. max_norm=1.0 should keep the starting error vaguely under control. 
+                trainable=True
+            )
+
+            # For L2 reg, see: https://www.tensorflow.org/api_docs/python/tf/contrib/layers/l2_regularizer
+
+            b = tf.get_variable(
+                prefix+"b"+name,
+                (y),
+                precision,
+                tf.zeros_initializer,
+                trainable=True
+            )
 
             input_layer = tf.layers.dropout(self.As[-1], rate=dropout_rate)
 
-            A = tf.layers.dense(
-                inputs=input_layer,
-                units=y,
-                use_bias=True,
-                activation=activation,
-                kernel_initializer=tf.random_normal_initializer(mean=0, stddev=(2.0/(x+y))**0.5),
-                kernel_regularizer=tf.keras.regularizers.l2(),
-                name=name)
+            A = tf.matmul(input_layer, W) + b
 
+            if idx != len(layer_sizes) - 1:
+                A = activation_fn(A)
+
+            self.Ws.append(W)
+            self.bs.append(b)
             self.As.append(A)
+
 
     def get_parameters(self):
         return self.Ws + self.bs
@@ -143,13 +155,10 @@ class MoleculeNN():
                 atom_type=atom_type,
                 prefix=prefix)
             self.anns.append(ann)
-
             atom_type_nrgs.append(ann.atom_energies())
-
 
         self.atom_outputs = tf.gather(tf.concat(atom_type_nrgs, axis=0), gather_idxs)
         self.atom_outputs = tf.reshape(self.atom_outputs, (-1, )) # (batch_size,)
-        # self.mol_nrgs = tf.reshape(tf.segment_sum(self.atom_nrgs, mol_idxs), (-1,))
 
     def get_parameters(self):
         all_params = []
