@@ -110,18 +110,35 @@ class DataLoader():
     def load_gdb8(self,
         data_dir,
         calibration_file=None,
-        ff_train_dirs=None):
+        ff_train_dirs=None,
+        gdb_min_n=1,
+        gdb_max_n=8):
+        """
+        Load gdb datafiles
+        we read files on the fully closed range [gdb_min_n, gdb_max_n]
+        
+        Params 
+        ------
+        data_dir: str
+            location of data files
+        calibration_file: str
+            name of calibration file
+        ff_train_dirs: list of str
+            list of names of ff data files
+        gdb_min_n: int
+            minimum gdb file to add
+        gdb_max_n: int
+            maximum gdb file to add (inclusive)
+                     
+        """
 
-        gdb_files = [
-            os.path.join(data_dir, "ani_gdb_s01.h5"),
-            os.path.join(data_dir, "ani_gdb_s02.h5"),
-            os.path.join(data_dir, "ani_gdb_s03.h5"),
-            # os.path.join(data_dir, "ani_gdb_s04.h5"),
-            # os.path.join(data_dir, "ani_gdb_s05.h5"),
-            # os.path.join(data_dir, "ani_gdb_s06.h5"),
-            # os.path.join(data_dir, "ani_gdb_s07.h5"),
-            # os.path.join(data_dir, "ani_gdb_s08.h5"),
-        ]
+        assert gdb_min_n >= 1
+        assert gdb_max_n <= 8
+        assert gdb_max_n >= gdb_min_n
+
+        gdb_files = []
+        for n in range(gdb_min_n, gdb_max_n + 1):
+            gdb_files.append(os.path.join(data_dir, "ani_gdb_s0" + str(n) + ".h5"))
 
         if calibration_file:
             cal_map = load_calibration_file(calibration_file)

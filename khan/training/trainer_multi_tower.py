@@ -243,7 +243,8 @@ class Trainer():
         layer_sizes=(128, 128, 64, 8, 1),
         activation_fn=activations.waterslide,
         fit_charges=False,
-        featurization_parameters=FeaturizationParameters()):
+        featurization_parameters=FeaturizationParameters(),
+        ewc_read_file=None):
         """
         A queue-enabled multi-gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
@@ -277,6 +278,15 @@ class Trainer():
         self.yt_enq = tf.placeholder(dtype=precision)
 
 
+        # parameters for elastic weight consolidation
+        self._ewc_params = []
+        if ewc_read_file is not None:
+            F, C = self.read_ewc_params(ewc_read_file)
+            self._ewc_params = (
+                tf.constant(F, name="fisher", dtype=self.precision),
+                tf.constant(C, name="coeffs", dtype=self.precision)
+            )
+
         dtypes=[
             precision,  # Xs
             precision,  # Ys
@@ -308,12 +318,18 @@ class Trainer():
         self.sess = sess
         self.non_trainable_variables = []
 
-        self.learning_rate = tf.get_variable('learning_rate', tuple(), precision, tf.constant_initializer(1e-4), trainable=False)
+        self.learning_rate = tf.get_variable(
+            'learning_rate',
+             tuple(),
+             precision,
+             tf.constant_initializer(1e-4),
+             trainable=False)
+
         self.optimizer = NadamOptimizer(
-                learning_rate=self.learning_rate,
-                beta1=0.9,
-                beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
-                epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
+            learning_rate=self.learning_rate,
+            beta1=0.9,
+            beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
+            epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
 
         self.dropout_rate = tf.get_variable('dropout_rate', tuple(), tf.float32, tf.constant_initializer(0), trainable=False)
         self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
@@ -323,9 +339,10 @@ class Trainer():
         self.incr_global_epoch_count = tf.assign(self.global_epoch_count, tf.add(self.global_epoch_count, 1))
         self.incr_local_epoch_count = tf.assign(self.local_epoch_count, tf.add(self.local_epoch_count, 1))
         self.reset_local_epoch_count = tf.assign(self.local_epoch_count, 0)
+        self.reset_optimizer = tf.variables_initializer(self.optimizer.variables())
+        self.reset_learning_rate = tf.assign(self.learning_rate, 1.0e-4)
 
         get_op = queue.dequeue()
-        # bi_deq is not used, we can 
         x_deq, y_deq, z_deq, a_deq, m_deq, labels = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]
         self.xs = x_deq
         self.ys = y_deq
@@ -385,12 +402,12 @@ class Trainer():
             prefix="near_")
 
         self.models = [model_near]
-
+            
         # avoid duplicate parameters from later towers since the variables are shared.
         # if tower_idx == 0:
             # self.parameters.extend(model_near.get_parameters())
 
-        # self.all_models.append(model_near)
+        #self.models.append(tower_model_near)
         tower_near_energy = tf.segment_sum(model_near.atom_outputs, m_deq)
 
         if fit_charges:
@@ -400,6 +417,7 @@ class Trainer():
                 atom_type_features=[f0, f1, f2, f3],
                 gather_idxs=gather_idxs,
                 layer_sizes=(feat_size,) + layer_sizes,
+                dropout_rate=self.dropout_rate,
                 precision=precision,
                 prefix="charge_")
 
@@ -452,6 +470,36 @@ class Trainer():
         self.force_rmses = dx_l2 + dy_l2 + dz_l2
         self.force_exp_loss = tf.exp(tf.cast(self.force_rmses, dtype=tf.float64))
 
+        self.ewc_penalty_op = tf.constant(0.0)
+        # apply EWC if we have parameters
+        if self._ewc_params:
+            F, C0 = self._ewc_params 
+            C = self.params_vector()
+            dC = tf.subtract(C, C0)
+            FdC = tf.multiply(F, dC)
+            dCFdC = tf.multiply(dC, FdC)
+
+            self.ewc_penalty_op = tf.reduce_sum(dCFdC)
+            self.exp_ewc_penalty_op = tf.exp(tf.cast(tf.sqrt(self.ewc_penalty_op), dtype=tf.float64))
+
+            # add to loss. we exponentiate and multiply to match the loss function
+            # i.e. we want exp(loss + penalty) = exp(loss) * exp(penalty)
+            self.exp_loss = tf.multiply(
+                self.exp_loss,
+                self.exp_ewc_penalty_op
+            )
+
+        # op for computing the diagonal of the Fisher
+        # See Revisiting natural gradient for deep networks
+        # Pascanu and Bengio
+        # Fisher is essential the square of the derivative of the predictions
+        all_vars = self._weight_matrices() + self._biases()
+        grad_log_p = tf.gradients(self.energies, all_vars)
+        grad_log_p_flat = [tf.reshape(tensor, [-1]) for tensor in grad_log_p]
+        grad_log_p_vec = tf.concat(grad_log_p_flat, axis=0)
+        self.fisher_diagonal_op = tf.square(grad_log_p_vec) 
+
+        # setup training
         self.train_op = self.optimizer.minimize(self.exp_loss)
         self.train_op_forces = self.optimizer.minimize(self.force_exp_loss)
 
@@ -472,6 +520,27 @@ class Trainer():
         """
         self.sess.run(self.global_initializer_op)
 
+    def _save_vars(self, tf_vars, npz_file):
+        """
+        Save tf variabes into a numpy npz. For the sake of consistency, we require that
+        the npz_file ends in .npz
+
+        Parameters
+        ----------
+        tf_vars: list of tf tensors
+            tensors/variabes to save
+        npz_file: str
+            filename to save under. Must end in .npz
+
+        """
+        _, file_ext = os.path.splitext(npz_file)
+        assert file_ext == ".npz"
+        save_objs = {}
+        for var, val in zip(tf_vars, self.sess.run(tf_vars)):
+            save_objs[var.name] = val
+        np.savez(npz_file, **save_objs)
+        
+
     def save_numpy(self, npz_file):
         """
         Save the parameters into a numpy npz. For the sake of consistency, we require that
@@ -486,13 +555,8 @@ class Trainer():
             filename to save under. Must end in .npz
 
         """
-        _, file_ext = os.path.splitext(npz_file)
-        assert file_ext == ".npz"
-        save_objs = {}
         all_vars = tf.global_variables()
-        for var, val in zip(all_vars, self.sess.run(all_vars)):
-            save_objs[var.name] = val
-        np.savez(npz_file, **save_objs)
+        self._save_vars(all_vars, npz_file)
 
     def load_numpy(self, npz_file, strict=True):
         """
@@ -712,15 +776,134 @@ class Trainer():
         results = self.feed_dataset(
             dataset,
             shuffle=False,
-            target_ops=[self.tower_preds, self.tower_bids],
+            target_ops=[self.energies],
             batch_size=batch_size
         )
 
-        ordered_ys = []
-        for (ys, ids) in results:
-            sorted_ys = np.take(ys, np.argsort(ids), axis=0)
-            ordered_ys.extend(np.concatenate(sorted_ys, axis=0))
-        return ordered_ys
+        return results
+
+    def save_ewc_params(self, dataset, ewc_npz_file, batch_size=2048):
+        """
+        Compute and store parameters required for elastic weight consolidation
+        """
+        print("\nsaving EWC parameters...")
+        start_time = time.time()
+
+        F = self.fisher_diagonal(dataset, batch_size)
+        params_vec = self.params_vector()
+        C = self.sess.run(params_vec)
+
+        ewc_data = {"fisher": F, "coefficients": C}
+        np.savez(ewc_npz_file, **ewc_data)
+
+        print("time for fisher %.2f" % (time.time() - start_time))
+
+
+    def read_ewc_params(self, ewc_npz_file, prefactor=1.0):
+        """
+        Read EWC data from previous run and return the parameters as numpy arrays 
+        """
+
+        print("reading ewc parameters..")
+        data = np.load(ewc_npz_file, allow_pickle=False)
+        F = data["fisher"]
+        C = data["coefficients"]
+
+        F = prefactor * F 
+
+        print("Statistics on F and C after normalization")
+        print("Max element of fisher %.4e" % np.max(F))
+        print("Min element of fisher %.4e" % np.min(F))
+        print("mean element of fisher %.4e" % np.mean(F))
+        print("stddev of fisher %.4e" % np.std(F))
+
+        print("Max element of C %.4e" % np.max(C))
+        print("Min element of C %.4e" % np.min(C))
+        print("mean element of C %.4e" % np.mean(C))
+        print("stddev of C %.4e" % np.std(C))
+
+        return F, C
+
+    def params_list(self):
+        """
+        list the parameters (trainable vars) as a list of tensors
+        """
+        return self._weight_matrices() + self._biases()
+
+    def params_vector(self):
+        """
+        Return current parameters (trainable vars) as a single rank 1 tensor 
+        """
+        all_vars = [tf.reshape(var, [-1]) for var in self.params_list()] 
+        all_vars_vec = tf.concat(all_vars, axis=0)
+        return all_vars_vec
+
+    def ewc_penalty(self):
+        """
+        Compute the current ewc penalty
+        this is (C-C0).F.(C-C0) where C0 is a vector
+        of saved parameters
+        """
+        return self.sess.run(self.exp_ewc_penalty_op)
+
+    def loss(self, dataset, batch_size=2048):
+        """
+        compute the value of the loss function
+        """
+        results = self.feed_dataset(
+            dataset,
+            shuffle=False,
+            target_ops=[self.exp_loss],
+            batch_size=batch_size
+        )
+
+        loss_func = 0.0
+        for r in results:
+            loss_func += r[0]
+
+        return loss_func
+        
+
+    def fisher_diagonal(self, dataset, batch_size=2048):
+        """
+        Compute and return the diagonal of the Fisher information matrix
+
+        Parameters
+        ----------
+        dataset: khan.RawDataset
+            Dataset from which we predict from.
+
+        batch_size: int (optional)
+            Size of each batch used during prediction.
+
+        Returns
+        -------
+        numpy array 
+            
+        """
+
+        params_vec = self.params_vector()
+        num_vars = params_vec.shape[0]
+
+        coeffs = np.zeros(num_vars)
+        fisher_diag = np.zeros(num_vars)
+
+        n_examples = dataset.num_mols()
+        results = self.feed_dataset(
+            dataset,
+            shuffle=False,
+            target_ops=[self.fisher_diagonal_op],
+            batch_size=batch_size
+        )
+        n_batches = 0
+        for ys in results:
+            n_batches += 1
+            for y in ys:
+                fisher_diag += np.array(y) / float(batch_size)
+
+        fisher_diag = fisher_diag / float(n_batches)
+
+        return fisher_diag
 
     def eval_rel_rmse(self, dataset, group_ys, batch_size=1024):
         """

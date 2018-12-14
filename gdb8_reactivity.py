@@ -5,7 +5,7 @@ import tensorflow as tf
 import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
+from khan.training.trainer_multi_tower import Trainer, flatten_results, initialize_module
 from khan.model import activations
 
 from data_utils import HARTREE_TO_KCAL_PER_MOL, load_reactivity_data
@@ -28,8 +28,6 @@ def main():
     parser.add_argument('--ani-lib', required=True, help="Location of the shared object for GPU featurization")
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add-ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
-    parser.add_argument('--gpus', default=1, help="Number of gpus we use")
-
     parser.add_argument('--save-dir', default='~/work', help="Location where save data is dumped. If the folder does not exist then it will be created.")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="Location where training data is located")
 
@@ -81,7 +79,38 @@ def main():
         help="Floating point precision of NN"
     )
 
+    parser.add_argument(
+        '--ewc-save-file',
+        default=None,
+        type=str,
+        help="file to save EWC parameters to (stored in save-dir)"
+    )
+
+    parser.add_argument(
+        '--ewc-read-file',
+        default=None,
+        type=str,
+        help="file which has previously saved EWC parameters to use (assumed to be in save-dir)"
+    )
+
+    parser.add_argument(
+        '--gdb-min-n',
+        default=1,
+        type=int,
+        help="min gdb dataset to load"
+    )
+
+    parser.add_argument(
+        '--gdb-max-n',
+        default=3,
+        type=int,
+        help="max gdb dataset to load"
+    )
+
     args = parser.parse_args()
+
+    if args.ewc_save_file is not None:
+        assert args.ewc_save_file.endswith(".npz")
 
     print("Arguments", args)
 
@@ -100,13 +129,18 @@ def main():
 
     data_loader = DataLoader(False)
 
-    all_Xs, all_Ys = data_loader.load_gdb8(ANI_TRAIN_DIR)
+    all_Xs, all_Ys = data_loader.load_gdb8(
+        ANI_TRAIN_DIR, gdb_min_n=args.gdb_min_n, gdb_max_n=args.gdb_max_n)
 
     X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+
     rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
 
-    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
-    rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
+    X_gdb3, y_gdb3 = data_loader.load_gdb8(ANI_TRAIN_DIR, gdb_min_n=1, gdb_max_n=2)
+    rd_gdb3 = RawDataset(X_gdb3, y_gdb3)
+
+    #X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
+    #rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
 
     rd_rxn_test, rd_rxn_train, rd_rxn_all, rd_rxn_big = \
         (None, None, None, None)
@@ -144,28 +178,24 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        n_gpus = int(args.gpus)
-        if n_gpus > 0:
-            towers = ["/gpu:"+str(i) for i in range(n_gpus)]
-        else:
-            towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
-
         layers = (128, 128, 64, 1)
         if args.deep_network:
             layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
 
-        print("Soft placing operations onto towers:", towers)
-
         activation_fn = activations.get_fn_by_name(args.activation_function)
         precision = PRECISION[args.precision]
 
-        trainer = TrainerMultiTower(
+        ewc_read_file = None
+        if args.ewc_read_file is not None:
+            ewc_read_file = os.path.join(args.save_dir, args.ewc_read_file)
+
+        trainer = Trainer(
             sess,
-            towers=towers,
             precision=precision,
             layer_sizes=layers,
             activation_fn=activation_fn,
             fit_charges=args.fit_charges,
+            ewc_read_file=ewc_read_file,
         )
 
         if args.convert_checkpoint:
@@ -179,6 +209,9 @@ def main():
         if os.path.exists(save_file):
             print("Restoring existing model from", save_file)
             trainer.load_numpy(save_file)
+            print("Re-setting optimizer parameters")
+            sess.run(trainer.reset_optimizer)
+            sess.run(trainer.reset_learning_rate)
         else:
             if not os.path.exists(ANI_SAVE_DIR):
                 print("Save directory",ANI_SAVE_DIR,"does not existing... creating")
@@ -191,23 +224,20 @@ def main():
             trainer.global_epoch_count,
             trainer.learning_rate,
             trainer.local_epoch_count,
-            trainer.unordered_l2s,
+            trainer.l2s,
             trainer.train_op,
         ]
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
-
-        # Uncomment if you'd like to inspect the gradients
-        # all_grads = []
-        # for grad in trainer.coordinate_gradients(rd_test):
-        #     all_grads.append(grad)
-        # assert len(all_grads) == rd_test.num_mols()
+        print("Initial test score %.2f" % best_test_score)
+        gdb3_abs_rmse = trainer.eval_abs_rmse(rd_gdb3)
+        print("Initial gdb3 rmse %.2f" % gdb3_abs_rmse)
 
         print("------------Starting Training--------------")
 
         start_time = time.time()
 
-        while sess.run(trainer.learning_rate) > 5e-10: # this is to deal with a numerical error, we technically train to 1e-9
+        while sess.run(trainer.learning_rate) > 5.0e-6: # this is to deal with a numerical error, we technically train to 1e-9
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
@@ -218,8 +248,9 @@ def main():
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
-                    batch_size=batch_size,
-                    before_hooks=trainer.max_norm_ops))
+                    batch_size=batch_size
+                ))
+                    #before_hooks=trainer.max_norm_ops))
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time
@@ -232,8 +263,10 @@ def main():
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 if test_abs_rmse < best_test_score:
-                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    gdb3_abs_rmse = trainer.eval_abs_rmse(rd_gdb3)
+                    print(' | gdb3 abs rmse', "{0:.2f} kcal/mol | ".format(gdb3_abs_rmse), end='')
+                    #gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                    #print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
 
                     best_test_score = test_abs_rmse
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
@@ -260,7 +293,18 @@ def main():
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])
 
+                if ewc_read_file is not None:
+                    loss = trainer.loss(rd_train, batch_size=2048)
+                    ewc_penalty = trainer.ewc_penalty()
+                   
+                    print("\n")
+                    print("energy loss %.4e" % (loss/ewc_penalty))
+                    print("ewc penalty %.4e" % ewc_penalty)
+                    print("total loss %.4e" % loss)
+                    print("\n")
+
                 trainer.save_numpy(save_file)
+
 
                 print('', end='\n')
 
@@ -268,6 +312,11 @@ def main():
             sess.run(trainer.decr_learning_rate)
             sess.run(trainer.reset_local_epoch_count)
             # trainer.load_best_params()
+
+            # save fisher
+            if args.ewc_save_file:
+                trainer.save_ewc_params(
+                    rd_train, os.path.join(args.save_dir, args.ewc_save_file), batch_size=2048)
 
     return
 
