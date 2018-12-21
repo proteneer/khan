@@ -11,10 +11,11 @@ import scipy.optimize
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
 from khan.model import activations
+from khan.utils.helpers import atomic_number_to_atom_id
+from khan.utils.constants import ANGSTROM_IN_BOHR
 import data_utils
 import tensorflow as tf
 
-BOHR_PER_ANGSTROM = 0.52917721092
 kT = 0.001 # in Hartree
 NN_LAYERS = tuple([256]*4 + [1])
 NN_ACTIVATION = 'waterslide'
@@ -44,7 +45,7 @@ def load_NN_models(filenames, sess):
 def model_E_and_grad(xyz, elements, model):
     # xyz and elements must be merged into [element, x, y, z]
     # model must be a Trainer object
-    nn_atom_types = [data_utils.atomic_number_to_atom_id(elem) for elem in elements]
+    nn_atom_types = [atomic_number_to_atom_id(elem) for elem in elements]
     xyz = [[i]+list(xx) for i, xx in zip(nn_atom_types, xyz)]
     #print('in model_E_and_grad, xyz =', xyz)
     rd = RawDataset([xyz], [0.0])
@@ -53,7 +54,7 @@ def model_E_and_grad(xyz, elements, model):
     energy += self_interaction
     #gradient = list(model.coordinate_gradients(rd))[0]
     #gradient = gradient.reshape(gradient.size)
-    #gradient *= BOHR_PER_ANGSTROM
+    #gradient *= ANGSTROM_IN_BOHR
     return energy/kT, None  #gradient/kT # return E in units of kT, gradient in units of kT/Angstrom
 
 

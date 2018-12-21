@@ -3,6 +3,7 @@ import os
 
 import time
 import data_utils
+from khan.utils.constants import ANGSTROM_IN_BOHR, KCAL_MOL_IN_HARTREE
 
 def load_calibration_file(calibration_file):
     with open(calibration_file, 'r') as fh:
@@ -24,14 +25,11 @@ mapping = {
     "O": 3
 }
 
-HARTREE_TO_KCAL_PER_MOL = 627.509
-BOHR_TO_ANGSTROM = 0.529177249
-
 selfIxnNrgFitted = np.array([
-    -374.85 / HARTREE_TO_KCAL_PER_MOL, 
-    -23898.1 / HARTREE_TO_KCAL_PER_MOL, 
-    -34337.6 / HARTREE_TO_KCAL_PER_MOL, 
-    -47188.0 / HARTREE_TO_KCAL_PER_MOL 
+    -374.85 / KCAL_MOL_IN_HARTREE, 
+    -23898.1 / KCAL_MOL_IN_HARTREE, 
+    -34337.6 / KCAL_MOL_IN_HARTREE, 
+    -47188.0 / KCAL_MOL_IN_HARTREE
 ], dtype=np.float32)
 
 
@@ -74,12 +72,12 @@ def extract_file(fname):
             tmp = g.split()
             np_geoms.append([
                             np.float64(mapping[tmp[0][0]]),
-                            np.float64(tmp[1])*BOHR_TO_ANGSTROM,
-                            np.float64(tmp[2])*BOHR_TO_ANGSTROM,
-                            np.float64(tmp[3])*BOHR_TO_ANGSTROM
+                            np.float64(tmp[1])*ANGSTROM_IN_BOHR,
+                            np.float64(tmp[2])*ANGSTROM_IN_BOHR,
+                            np.float64(tmp[3])*ANGSTROM_IN_BOHR
                             ])
 
-        np_forces = np.array(np_forces) / BOHR_TO_ANGSTROM
+        np_forces = np.array(np_forces) / ANGSTROM_IN_BOHR
         np_geoms = np.array(np_geoms)
 
         atom_types = np_geoms[:, 0]

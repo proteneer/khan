@@ -9,7 +9,7 @@ import scipy.optimize
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
 import data_utils
-from data_utils import HARTREE_TO_KCAL_PER_MOL
+from khan.utils.constants import ANGSTROM_IN_BOHR
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,7 +18,6 @@ from multiprocessing.dummy import Pool as ThreadPool
 import multiprocessing
 import argparse
 
-BOHR_PER_ANGSTROM = 0.52917721092
 kT = 0.001 # in Hartree
 NN_LAYERS = tuple([256]*4 + [1])
 
@@ -156,7 +155,7 @@ def model_E_and_grad(xyz, nn_atom_types, model):
     energy += self_interaction
     gradient = list(model.coordinate_gradients(rd))[0]
     gradient = gradient.reshape(gradient.size)
-    gradient *= BOHR_PER_ANGSTROM
+    gradient *= ANGSTROM_IN_BOHR 
     return energy, gradient
 
 

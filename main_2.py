@@ -11,7 +11,6 @@ import sklearn.model_selection
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
 
-from data_utils import HARTREE_TO_KCAL_PER_MOL
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 

@@ -3,23 +3,56 @@ import numpy as np
 import time
 import tensorflow as tf
 import sklearn.model_selection
+import pickle
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import Trainer, flatten_results, initialize_module
 from khan.model import activations
 
-from data_utils import HARTREE_TO_KCAL_PER_MOL, load_reactivity_data
+from data_utils import load_reactivity_data
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
+from khan.lad import lad
+from khan.lad import lad_coulomb
+
+from multiprocessing import Pool as ThreadPool 
 import multiprocessing
 import argparse
 import functools
+import time
+
+from line_profiler import LineProfiler
 
 PRECISION = {
     "single": tf.float32,
     "double": tf.float64
 }
+
+def get_pid(x):
+    return os.getpid()
+
+def train_test_split(X, y, test_percent):
+    """
+    Split data set into train test, handles edge cases
+    """
+
+    if test_percent == 1.0:
+        X_train = []
+        Y_train = [] 
+        X_test = list(X)
+        Y_test = list(y)
+    elif test_percent == 0.0:
+        X_train = list(X)
+        Y_train = list(y)
+        X_test = []
+        Y_test = []
+    else:
+        X_train, X_test, Y_train, Y_test = sklearn.model_selection.train_test_split(
+            X, y, test_size=test_percent)
+
+    return X_train, X_test, Y_train, Y_test
 
 def main():
 
@@ -28,8 +61,54 @@ def main():
     parser.add_argument('--ani-lib', required=True, help="Location of the shared object for GPU featurization")
     parser.add_argument('--fitted', default=False, action='store_true', help="Whether or use fitted or self-ixn")
     parser.add_argument('--add-ffdata', default=False, action='store_true', help="Whether or not to add the forcefield data")
+    parser.add_argument('--cpus', default=1, type=int, help="Number of cpus we use")
+
     parser.add_argument('--save-dir', default='~/work', help="Location where save data is dumped. If the folder does not exist then it will be created.")
     parser.add_argument('--train-dir', default='~/ANI-1_release', help="Location where training data is located")
+    parser.add_argument('--test-size', default=0.25, help='fraction of ANI1 and dimer data in test set')
+    parser.add_argument('--lad-data', default=None, help='Location of reference LAD data (json).  If given long range coulomb energy based on LAD charges will be removed prior to training')
+
+    parser.add_argument(
+        '--pickle-output',
+        default=None,
+        type=str,
+        help="if given and doing lad pickle a gdb8 dataset with coulomb removed to this file"
+    )
+
+    parser.add_argument(
+        '--gdb8-pickle',
+        default=None,
+        type=str,
+        help='pickle file for gdb8 dataset with coulomb removed'
+    )
+
+    parser.add_argument(
+        '--fuzz',
+        default=None,
+        type=float,
+        help='value to use for fuzzing, the defaut is no fuzzing'
+    )
+
+    parser.add_argument(
+        '--json-train-dir',
+        default=[],
+        nargs='*',
+        type=str,
+        help='location of additional training data (json format)'
+    )
+
+    parser.add_argument(
+        '--dimer-dir',
+        default=None,
+        help='location of dimer data'
+    )
+
+    parser.add_argument(
+        '--dimer-test-percent',
+        default=0.25,
+        type=float,
+        help='percent of dimer data to put in test set'
+    )
 
     parser.add_argument(
         '--reactivity-dir',
@@ -80,6 +159,13 @@ def main():
     )
 
     parser.add_argument(
+        '--drop-probability',
+        default=0.0,
+        type=float,
+        help='probability of dropping params in dropout'
+    )
+
+    parser.add_argument(
         '--ewc-save-file',
         default=None,
         type=str,
@@ -102,7 +188,7 @@ def main():
 
     parser.add_argument(
         '--gdb-max-n',
-        default=3,
+        default=8,
         type=int,
         help="max gdb dataset to load"
     )
@@ -113,6 +199,12 @@ def main():
         assert args.ewc_save_file.endswith(".npz")
 
     print("Arguments", args)
+
+    # setup lad  
+    if args.lad_data:
+        lad_params = dict(lad.LAD_PARAMS)
+        reference_lads = lad.read_reference_lads(
+            args.lad_data, lad_params)
 
     lib_path = os.path.abspath(args.ani_lib)
     print("Loading custom kernel from", lib_path)
@@ -129,28 +221,104 @@ def main():
 
     data_loader = DataLoader(False)
 
-    all_Xs, all_Ys = data_loader.load_gdb8(
-        ANI_TRAIN_DIR, gdb_min_n=args.gdb_min_n, gdb_max_n=args.gdb_max_n)
+    ncpu = int(args.cpus)
+    pool = None
+    if args.cpus > 1:
+        print("Using cpu thread pool with %d processes" % args.cpus)
+        pool = ThreadPool(args.cpus)
 
-    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(all_Xs, all_Ys, test_size=0.25) # stratify by UTT would be good to try here
+    if args.gdb8_pickle is not None:
+        print("Reading gdb8 pickle")
+        with open(args.gdb8_pickle, "rb") as fin:
+            rd_tmp = pickle.load(fin)
+            all_Xs = rd_tmp.all_Xs
+            all_Ys = rd_tmp.all_ys
 
-    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+    else:
+        all_Xs, all_Ys = data_loader.load_gdb8(
+            ANI_TRAIN_DIR, gdb_min_n=args.gdb_min_n, gdb_max_n=args.gdb_max_n)
 
-    X_gdb3, y_gdb3 = data_loader.load_gdb8(ANI_TRAIN_DIR, gdb_min_n=1, gdb_max_n=2)
-    rd_gdb3 = RawDataset(X_gdb3, y_gdb3)
+        if args.lad_data:
+            lad_coulomb.remove_coulomb(all_Xs, all_Ys, lad_params, reference_lads, pool)
+            if args.pickle_output:
+                rd_tmp = RawDataset(all_Xs, all_Ys)
+                with open(args.pickle_output, "wb") as fout:
+                    pickle.dump(rd_tmp, fout)
 
-    #X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
-    #rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
+    X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(
+        all_Xs, all_Ys, test_size=args.test_size) # stratify by UTT would be good to try here
 
-    rd_rxn_test, rd_rxn_train, rd_rxn_all, rd_rxn_big = \
-        (None, None, None, None)
+    # gdb11
+    X_gdb11, y_gdb11 = data_loader.load_gdb11(ANI_TRAIN_DIR)
+    if args.lad_data:
+        lad_coulomb.remove_coulomb(X_gdb11, y_gdb11, lad_params, reference_lads, pool)
+    rd_gdb11 = RawDataset(X_gdb11, y_gdb11)
+
+    # extra training data
+    if args.json_train_dir:
+        for train_dir in args.json_train_dir:
+
+            X_t_all, Y_t_all, _, _ = load_reactivity_data(train_dir, percent_test=0.0)
+
+            if args.lad_data:
+                lad_coulomb.remove_coulomb(X_t_all, Y_t_all, lad_params, reference_lads, pool)
+
+            X_t_train, X_t_test, Y_t_train, Y_t_test = train_test_split(
+                X_t_all, Y_t_all, 0.0)
+
+            print("Adding %d training datapoints from file %s" % (len(Y_t_train), train_dir))
+            print("Adding %d test datapoints from file %s" % (len(Y_t_test), train_dir))
+
+            X_train.extend(X_t_train)
+            y_train.extend(Y_t_train)
+            X_test.extend(X_t_test)
+            y_test.extend(Y_t_test)
+
+
+    # dimer data
+    rd_d_test, rd_d_train = (None, None)
+    if args.dimer_dir is not None:
+
+        X_d_all, Y_d_all, _, _ = load_reactivity_data(args.dimer_dir, percent_test=0.0)
+
+        if args.lad_data:
+            lad_coulomb.remove_coulomb(X_d_all, Y_d_all, lad_params, reference_lads, pool)
+
+        X_d_train, X_d_test, Y_d_train, Y_d_test = train_test_split(
+            X_d_all, Y_d_all, args.dimer_test_percent)
+
+        print("Number of dimer points in training set {0:d}".format(len(Y_d_train)))
+        print("Number of dimer points in test set {0:d}".format(len(Y_d_test)))
+
+        # add to training set
+        X_train.extend(X_d_train)
+        y_train.extend(Y_d_train)
+        X_test.extend(X_d_test)
+        y_test.extend(Y_d_test)
+
+        rd_d_test = RawDataset(X_d_test, Y_d_test)
+        rd_d_train = RawDataset(X_d_train, Y_d_train)
+
+    # reactivity data
+    rd_rxn_test, rd_rxn_train, rd_rxn_all  = (None, None, None)
     if args.reactivity_dir is not None:
+        # user higher cutoff as rxn is exothermic
+        energy_cut = 200.0 / KCAL_MOL_IN_HARTREE
         # add training data
-        X_rxn_train, Y_rxn_train, X_rxn_test, Y_rxn_test, X_rxn_big, Y_rxn_big = \
-            load_reactivity_data(args.reactivity_dir, args.reactivity_test_percent)
+        X_rxn_all, Y_rxn_all, _, _ = load_reactivity_data(
+            args.reactivity_dir, percent_test=0.0, energy_cutoff=energy_cut)
 
+        if args.lad_data:
+            lad_coulomb.remove_coulomb(X_rxn_all, Y_rxn_all, lad_params, reference_lads, pool)
+
+        X_rxn_train, X_rxn_test, Y_rxn_train, Y_rxn_test = train_test_split(
+            X_rxn_all, Y_rxn_all, args.reactivity_test_percent)
+
+        # add to training set
         X_train.extend(X_rxn_train)
         y_train.extend(Y_rxn_train)
+        X_test.extend(X_rxn_test)
+        y_test.extend(Y_rxn_test)
 
         print("Number of reactivity points in training set {0:d}".format(len(Y_rxn_train)))
         print("Number of reactivity points in test set {0:d}".format(len(Y_rxn_test)))
@@ -161,14 +329,15 @@ def main():
 
         # redundant, can be eliminated
         rd_rxn_all = RawDataset(X_rxn_test + X_rxn_train, Y_rxn_test + Y_rxn_train)
-        
-        # cannot currently handle this in test either
-        # everything over 32 atoms
-        rd_rxn_big = RawDataset(X_rxn_big, Y_rxn_big)
 
-    batch_size = 1024
+    # make train/test sets down here after rxn and dimer data have been added
+    rd_train, rd_test = RawDataset(X_train, y_train), RawDataset(X_test,  y_test)
+        
+    batch_size = 256 
 
     config = tf.ConfigProto(allow_soft_placement=True)
+    # suggested by Yutong
+    config.gpu_options.allow_growth=True
 
     with tf.Session(config=config) as sess:
 
@@ -178,7 +347,9 @@ def main():
         # max_local_epoch_count number of epochs have been run and no progress has been made, we decrease the learning
         # rate and restore the best found parameters.
 
-        layers = (128, 128, 64, 1)
+        #layers = (128, 128, 64, 1)
+        # per Adrian 11.16.2018
+        layers = (256, 256, 64, 1)
         if args.deep_network:
             layers = (256, 256, 256, 256, 256, 256, 256, 128, 64, 8, 1)
 
@@ -230,14 +401,12 @@ def main():
 
         best_test_score = trainer.eval_abs_rmse(rd_test)
         print("Initial test score %.2f" % best_test_score)
-        gdb3_abs_rmse = trainer.eval_abs_rmse(rd_gdb3)
-        print("Initial gdb3 rmse %.2f" % gdb3_abs_rmse)
 
         print("------------Starting Training--------------")
 
         start_time = time.time()
 
-        while sess.run(trainer.learning_rate) > 5.0e-6: # this is to deal with a numerical error, we technically train to 1e-9
+        while sess.run(trainer.learning_rate) > 2.0e-6: # loose training 
 
             while sess.run(trainer.local_epoch_count) < max_local_epoch_count:
 
@@ -248,13 +417,15 @@ def main():
                     rd_train,
                     shuffle=True,
                     target_ops=train_ops,
-                    batch_size=batch_size
+                    batch_size=batch_size,
+                    dropout_rate=args.drop_probability,
+                    fuzz=args.fuzz,
+                    before_hooks=trainer.max_norm_ops,
                 ))
-                    #before_hooks=trainer.max_norm_ops))
 
                 global_epoch = train_results[0][0]
                 time_per_epoch = time.time() - start_time
-                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * KCAL_MOL_IN_HARTREE 
                 learning_rate = train_results[0][1]
                 local_epoch_count = train_results[0][2]
 
@@ -263,32 +434,31 @@ def main():
                     'train/test abs rmse:', "{0:.2f} kcal/mol,".format(train_abs_rmse), "{0:.2f} kcal/mol".format(test_abs_rmse), end='')
 
                 if test_abs_rmse < best_test_score:
-                    gdb3_abs_rmse = trainer.eval_abs_rmse(rd_gdb3)
-                    print(' | gdb3 abs rmse', "{0:.2f} kcal/mol | ".format(gdb3_abs_rmse), end='')
-                    #gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
-                    #print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
+                    gdb11_abs_rmse = trainer.eval_abs_rmse(rd_gdb11)
+                    print(' | gdb11 abs rmse', "{0:.2f} kcal/mol | ".format(gdb11_abs_rmse), end='')
 
                     best_test_score = test_abs_rmse
                     sess.run([trainer.incr_global_epoch_count, trainer.reset_local_epoch_count])
 
                     # info about reactivity training
                     rxn_pairs = [
-                        (rd_rxn_train, "train"),
-                        (rd_rxn_test, "test"),
-                        (rd_rxn_all, "all"),
-                        (rd_rxn_big, "big")
+                        (rd_rxn_train, "rxn train"),
+                        (rd_rxn_test, "rxn test"),
+                        (rd_rxn_all, "rxn all"),
+                        (rd_d_test, "dimer test"),
+                        (rd_d_train, "dimer train")
                     ]
                     for rd, name in rxn_pairs: 
                         if rd is not None:
-                            rxn_abs_rmse = trainer.eval_abs_rmse(rd)
+                            rxn_abs_rmse = 0.0
+                            if rd.num_mols() > 0:
+                                rxn_abs_rmse = trainer.eval_abs_rmse(rd)
+                            
                             print(
-                                ' | reactivity abs rmse ({0:s})'.format(name),
+                                ' | {0:s} abs rmse '.format(name),
                                 "{0:.2f} kcal/mol | ".format(rxn_abs_rmse),
                                 end=''
                             )
-                            # should really be a weighted ave
-                            if name == "test":
-                                best_test_score += rxn_abs_rmse
 
                 else:
                     sess.run([trainer.incr_global_epoch_count, trainer.incr_local_epoch_count])

@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
-from data_utils import HARTREE_TO_KCAL_PER_MOL
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
@@ -185,7 +185,7 @@ def main():
                     batch_size=batch_size,
                     before_hooks=trainer.max_norm_ops))
 
-                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results_energies, pos=3))) * KCAL_MOL_IN_HARTREE 
                 test_abs_rmse = trainer.eval_abs_rmse(rd_test_forces)
 
                 print("Energy training time", time.time()-start_time, "error:", train_abs_rmse, test_abs_rmse)

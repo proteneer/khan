@@ -5,9 +5,9 @@ import numpy as np
 from khan.data import pyanitools as pya
 import json
 from sklearn.model_selection import train_test_split
-
-
-HARTREE_TO_KCAL_PER_MOL = 627.509
+from khan.utils.helpers import atomic_number_to_atom_id, \
+    atom_id_to_atomic_number, convert_species_to_atomic_nums
+from khan.utils.constants import KCAL_MOL_IN_HARTREE, ENERGY_CUTOFF
 
 # these energies are incorrect, see https://github.com/isayev/ANI1_dataset/issues/2
 # the "correct" energies are 
@@ -42,32 +42,16 @@ selfIxnNrgMO62x = np.array([
 
 # linear fitted self-interaction
 selfIxnNrgFitted = np.array([
-    -374.85 / HARTREE_TO_KCAL_PER_MOL, 
-    -23898.1 / HARTREE_TO_KCAL_PER_MOL, 
-    -34337.6 / HARTREE_TO_KCAL_PER_MOL, 
-    -47188.0 / HARTREE_TO_KCAL_PER_MOL 
+    -374.85 / KCAL_MOL_IN_HARTREE, 
+    -23898.1 / KCAL_MOL_IN_HARTREE, 
+    -34337.6 / KCAL_MOL_IN_HARTREE, 
+    -47188.0 / KCAL_MOL_IN_HARTREE 
 ], dtype=np.float32)
 
 # import correction
 # import featurizer
 
 MAX_ATOM_LIMIT = 32
-
-def atomic_number_to_atom_id(atno):
-    """
-    Return an atom index (ANI atom type)  given an atomic number
-    atomic number must be convertable to an int
-    """
-    return {1: 0, 6: 1, 7: 2, 8: 3}[int(atno)]
-
-def convert_species_to_atomic_nums(s):
-  PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
-  res = []
-  for k in s:
-    res.append(PERIODIC_TABLE[k])
-  res =  np.array(res, dtype=np.int32)
-  np.ascontiguousarray(res)
-  return res
 
 
 def filter(xyz_file, use_fitted):
@@ -162,7 +146,7 @@ def parse_xyz(xyz_file, use_fitted):
             mo62xoffset += selfIxnNrgMO62x[z]
 
         if use_fitted:
-            js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/HARTREE_TO_KCAL_PER_MOL
+            js18pairwiseOffset = correction.jamesPairwiseCorrection_C(coords, Z)/KCAL_MOL_IN_HARTREE
             y -= js18pairwiseOffset
             if len(cols) == 9:
                 c = float(cols[-2])
@@ -231,7 +215,7 @@ def load_ff_files(ff_dir, use_fitted=False, names=[], group_names=[]):
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
-    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL,
+    energy_cutoff=ENERGY_CUTOFF,
     use_fitted=False):
     """
     Load the ANI dataset.
@@ -297,7 +281,7 @@ def load_hdf5_files(
 
 
                     # BROKEN FOR NOW
-                    js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/HARTREE_TO_KCAL_PER_MOL
+                    js18pairwiseOffset = correction.jamesPairwiseCorrection_C(R[k], Z)/KCAL_MOL_IN_HARTREE
                     y = E[k] - js18pairwiseOffset + calibration_offset
 
                     ys.append(y)
@@ -337,37 +321,29 @@ def load_hdf5_files(
 
     return Xs, ys
 
-def read_all_reactions(reactivity_dir):
+def read_all_reactions(reactivity_dir, energy_cutoff=ENERGY_CUTOFF):
     """
     Read reactivity data and return as a dict 
 
-    Returns two dicts for the "small" and "big" examples defined
-    by MAX_ATOM_LIMIT. The keys are filenames and values are lists of
+    Returns dict for examples.
+    The keys are filenames and values are lists of
     examples.  Example is a tuple (X, Y) for that reaction
     """
 
     skipped = 0
     cnt = 0
     reactions = {} 
-    big_reactions = {}
     for root, dirs, files in os.walk(reactivity_dir):
         for fname in files:
             if fname.endswith(".json"):
-                X, Y = _read_reactivity_data(os.path.join(reactivity_dir, fname))
+                X, Y = _read_reactivity_data(os.path.join(root, fname), energy_cutoff)
                 natoms = len(X[0])
-                if natoms < MAX_ATOM_LIMIT:
-                    reactions[fname[:-5]] = (X, Y)
-                else:
-                    big_reactions[fname[:-5]] = (X, Y)
-                    skipped += 1
-                cnt += 1
+                reactions[fname[:-5]] = (X, Y)
 
-    print("Found %d out of %d reactions with less than %d atoms" % (cnt-skipped, cnt, MAX_ATOM_LIMIT))
-
-    return reactions, big_reactions
+    return reactions
 
 
-def load_reactivity_data(reactivity_dir, percent_test=0.5):
+def load_reactivity_data(reactivity_dir, percent_test=0.5, energy_cutoff=ENERGY_CUTOFF):
     """
     Load all reactivity data from a directory
     split the reactions into testing/training sets (randomly)
@@ -376,10 +352,9 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
     each element of the list is a tuple (X, Y) for that reaction
     """
 
-    reactions_dict, big_reactions_dict = read_all_reactions(reactivity_dir)
+    reactions_dict = read_all_reactions(reactivity_dir, energy_cutoff)
 
     reactions = list(reactions_dict.values())
-    big_reactions = list(big_reactions_dict.values())
 
     # split by reaction type
     if percent_test == 1.0:
@@ -390,7 +365,7 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
         train = reactions
     else:
         train, test = train_test_split(reactions, test_size=percent_test)
-    Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest = ([], [], [], [], [], [])
+    Xtrain, Ytrain, Xtest, Ytest  = ([], [], [], [])
 
     # unpack each reaction into a list of X, Y values
     for A, B in train:
@@ -401,13 +376,9 @@ def load_reactivity_data(reactivity_dir, percent_test=0.5):
         Xtest.extend(A)
         Ytest.extend(B)
 
-    for A, B in big_reactions:
-        Xbigtest.extend(A)
-        Ybigtest.extend(B)
+    return Xtrain, Ytrain, Xtest, Ytest
 
-    return Xtrain, Ytrain, Xtest, Ytest, Xbigtest, Ybigtest
-
-def _read_reactivity_data(fname):
+def _read_reactivity_data(fname, energy_cutoff=ENERGY_CUTOFF):
     """
     Read data from json file prepared for QM data
     there are two fields X and Y which hold the molecule definition
@@ -420,19 +391,29 @@ def _read_reactivity_data(fname):
     X = data.get("X")
     Y = list(map(np.float64, data.get("Y")))
 
-    # remove atomic energies
-    for i, mol in enumerate(X):
-        self_interaction = sum(selfIxnNrgWB97X_631gdp[at] for at, x, y, z in mol)
-        Y[i] -= self_interaction
+    e_min = min(Y)
 
-    X_np = [np.array(molecule, dtype=np.float32) for molecule in X]
+    cnt = 0
+    X_filtered = []
+    Y_filtered = []
+    for mol, energy in zip(X, Y):
+        if energy - e_min < energy_cutoff:
+            self_interaction = sum(selfIxnNrgWB97X[at] for at, x, y, z in mol)
+            X_filtered.append(mol)
+            Y_filtered.append(energy - self_interaction)
+        else:
+            cnt += 1
 
-    return X_np, Y
+    print("rejected %d datapoints" % cnt)
+
+    X_np = [np.array(molecule, dtype=np.float32) for molecule in X_filtered]
+
+    return X_np, Y_filtered
 
 def load_hdf5_minima_gradients(
     hdf5files,
     calibration_map=None,
-    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL,
+    energy_cutoff=100.0/KCAL_MOL_IN_HARTREE,
     use_fitted=False):
     """
     Load the ANI dataset.

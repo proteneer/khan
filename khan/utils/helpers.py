@@ -1,6 +1,29 @@
 import math
 import numpy as np
 
+def atomic_number_to_atom_id(atno):
+    """
+    Return an atom index (ANI atom type)  given an atomic number
+    atomic number must be convertable to an int
+    """
+    return {1: 0, 6: 1, 7: 2, 8: 3}[int(atno)]
+
+def atom_id_to_atomic_number(atom_id):
+    """
+    Return an atomic number, given an atom index (ANI atom type)
+    """
+    return {0: 1, 1: 6, 2: 7, 3: 8}[atom_id]
+
+def convert_species_to_atomic_nums(s):
+  PERIODIC_TABLE = {"H": 0, "C": 1, "N": 2, "O": 3}
+  res = []
+  for k in s:
+    res.append(PERIODIC_TABLE[k])
+  res =  np.array(res, dtype=np.int32)
+  np.ascontiguousarray(res)
+  return res
+
+
 # invert a permutation
 def inv(p):
     inverse = [0] * len(p)

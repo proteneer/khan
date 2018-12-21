@@ -13,9 +13,9 @@ from tensorflow.contrib.opt import NadamOptimizer
 import khan
 from khan.utils.helpers import ed_harder_rmse
 from khan.model.nn import MoleculeNN
-from data_utils import HARTREE_TO_KCAL_PER_MOL
 from khan.data.dataset import RawDataset
 from khan.model import activations
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 
 ani_mod = None
 
@@ -246,7 +246,7 @@ class Trainer():
         featurization_parameters=FeaturizationParameters(),
         ewc_read_file=None):
         """
-        A queue-enabled multi-gpu trainer. Construction of this class will also
+        A queue-enabled gpu trainer. Construction of this class will also
         finalize and initialize all the variables pertaining to the input session.
 
         Parameters
@@ -263,6 +263,9 @@ class Trainer():
         precision: tf.dtype
             Should be either tf.float32 or tf.float64. Note that 64-bit precision is significantly slower than 32-bit.
 
+        ewc_read_file: str 
+            numpy file holding EWC parameters.  If given, these will be used for EWC.
+
         """
 
         assert fit_charges is False
@@ -276,7 +279,7 @@ class Trainer():
         self.a_enq = tf.placeholder(dtype=tf.int32)
         self.m_enq = tf.placeholder(dtype=tf.int32)
         self.yt_enq = tf.placeholder(dtype=precision)
-
+        self.dropout_rate = tf.placeholder(dtype=precision)
 
         # parameters for elastic weight consolidation
         self._ewc_params = []
@@ -294,6 +297,7 @@ class Trainer():
             tf.int32,   # As
             tf.int32,   # mol ids
             precision,  # Y TRUEs
+            precision,  # drop rate
         ]
 
         qtypes = [
@@ -303,6 +307,7 @@ class Trainer():
             self.a_enq,
             self.m_enq,
             self.yt_enq,
+            self.dropout_rate,
         ]
 
         # force fitting
@@ -331,7 +336,6 @@ class Trainer():
             beta2=0.999, # default is 0.999, 0.99 makes old curvature info decay 10x faster
             epsilon=1e-8) # default is 1e-8, 1e-7 is slightly less responsive to curvature, i.e. slower but more stable
 
-        self.dropout_rate = tf.get_variable('dropout_rate', tuple(), tf.float32, tf.constant_initializer(0), trainable=False)
         self.global_step = tf.get_variable('global_step', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
         self.decr_learning_rate = tf.assign(self.learning_rate, tf.multiply(self.learning_rate, 0.8))
         self.global_epoch_count = tf.get_variable('global_epoch_count', tuple(), tf.int32, tf.constant_initializer(0), trainable=False)
@@ -343,13 +347,13 @@ class Trainer():
         self.reset_learning_rate = tf.assign(self.learning_rate, 1.0e-4)
 
         get_op = queue.dequeue()
-        x_deq, y_deq, z_deq, a_deq, m_deq, labels = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5]
+        x_deq, y_deq, z_deq, a_deq, m_deq, labels, dropout_rate = get_op[0], get_op[1], get_op[2], get_op[3], get_op[4], get_op[5], get_op[6]
         self.xs = x_deq
         self.ys = y_deq
         self.zs = z_deq
         self.ms = m_deq
 
-        dx_deq, dy_deq, dz_deq = get_op[6], get_op[7], get_op[8]
+        dx_deq, dy_deq, dz_deq = get_op[7], get_op[8], get_op[9]
 
         mol_atom_counts = tf.segment_sum(tf.ones_like(m_deq), m_deq)
         mol_offsets = tf.cumsum(mol_atom_counts, exclusive=True)
@@ -397,7 +401,7 @@ class Trainer():
             atom_type_features=[f0, f1, f2, f3],
             gather_idxs=gather_idxs,
             layer_sizes=(feat_size,) + layer_sizes,
-            dropout_rate=self.dropout_rate,
+            dropout_rate=dropout_rate,
             activation_fn=activation_fn,
             prefix="near_")
 
@@ -417,7 +421,7 @@ class Trainer():
                 atom_type_features=[f0, f1, f2, f3],
                 gather_idxs=gather_idxs,
                 layer_sizes=(feat_size,) + layer_sizes,
-                dropout_rate=self.dropout_rate,
+                dropout_rate=dropout_rate,
                 precision=precision,
                 prefix="charge_")
 
@@ -677,7 +681,7 @@ class Trainer():
         """
         # Todo: add support for force errors.
         test_l2s = self.feed_dataset(dataset, shuffle=False, target_ops=[self.l2s], batch_size=batch_size)
-        return np.sqrt(np.mean(flatten_results(test_l2s))) * HARTREE_TO_KCAL_PER_MOL
+        return np.sqrt(np.mean(flatten_results(test_l2s))) * KCAL_MOL_IN_HARTREE
 
     def segment_results(self, operator, dataset, batch_size=1024):
         """
@@ -927,7 +931,7 @@ class Trainer():
 
         """
         ordered_ys = self.predict(dataset, batch_size)
-        return ed_harder_rmse(group_ys, ordered_ys) * HARTREE_TO_KCAL_PER_MOL
+        return ed_harder_rmse(group_ys, ordered_ys) * KCAL_MOL_IN_HARTREE
 
     def eval_eh_rmse(self, dataset, group_ys, batch_size=1024):
         """
@@ -1062,7 +1066,7 @@ class Trainer():
                         batch_size=batch_size,
                         before_hooks=self.max_norm_ops,
                         fuzz=1e-2 * 0.99**global_epoch + 1e-4) ) # apply fuzz to coordinates, starting out large to enforce flatness, discourage overfitting in early training steps
-                    train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+                    train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * KCAL_MOL_IN_HARTREE 
                     if n_steps>1:
                         print('%s Training step %d: train RMSE %.2f kcal/mol in %.1fs' % (save_dir, step, train_abs_rmse, time.time()-train_step_time) )
                     train_rmses.append( train_abs_rmse )

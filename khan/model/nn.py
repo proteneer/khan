@@ -68,7 +68,8 @@ class AtomNN():
                 trainable=True
             )
 
-            input_layer = tf.layers.dropout(self.As[-1], rate=dropout_rate)
+            # LDJ, training=False (the default) does nothing
+            input_layer = tf.layers.dropout(self.As[-1], rate=dropout_rate, training=True)
 
             A = tf.matmul(input_layer, W) + b
 

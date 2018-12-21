@@ -5,16 +5,8 @@ import sys
 import json
 import client_server
 
-KCAL = 627.509
-BOHR = 0.52917721092 
-
-# copied from data_utils so no imports are necessary
-def atomic_number_to_atom_id(atno):
-    """
-    Return an atom index (ANI atom type)  given an atomic number
-    atomic number must be convertable to an int
-    """
-    return {1: 0, 6: 1, 7: 2, 8: 3}[int(atno)]
+from khan.utils.helpers import atomic_number_to_atom_id
+from khan.utils.constants import KCAL_MOL_IN_HARTREE, ANGSTROM_IN_BOHR
 
 def read_json(fname):
     """
@@ -29,9 +21,9 @@ def read_json(fname):
     # need to change atomic numbers to atom id
     for line in X:
         line[0] = atomic_number_to_atom_id(line[0])
-        line[1] = line[1]*BOHR
-        line[2] = line[2]*BOHR
-        line[3] = line[3]*BOHR
+        line[1] = line[1]*ANGSTROM_IN_BOHR
+        line[2] = line[2]*ANGSTROM_IN_BOHR
+        line[3] = line[3]*ANGSTROM_IN_BOHR
 
     return json.dumps({"X": X})
 

@@ -1,6 +1,7 @@
 from khan.training.trainer_multi_tower import TrainerMultiTower, initialize_module
 from khan.data.dataset import RawDataset
 from khan.model import activations
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 from data_utils import load_reactivity_data, read_all_reactions 
 import tensorflow as tf
 import argparse
@@ -10,9 +11,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 import json
-
-KCAL = 627.509
-BOHR = 0.529
 
 
 def histogram(errors, label):
@@ -105,8 +103,8 @@ def write_reaction_data(name, X, E, trainer):
         grms = np.sqrt(gdotg / (natoms*ncarts))
         gdot = -gdotx / (np.sqrt(gdotg) * np.sqrt(xdotx))
 
-        dE = (E[i] - E[0])*KCAL
-        dP = (predictions[i] - predictions[0])*KCAL
+        dE = (E[i] - E[0])*KCAL_MOL_IN_HARTREE
+        dP = (predictions[i] - predictions[0])*KCAL_MOL_IN_HARTREE
         out_str.append("%.2f %.2f %.2f %.8f %.4f" % (dist, dE, dP, grms, gdot))
 
         if i < ngeoms - 1:
@@ -207,12 +205,12 @@ def main():
                 p_predictions = np.array(trainer.predict(rd_p))
                 ts_predictions = np.array(trainer.predict(rd_ts))
 
-                barriers = (Ets - Er)*KCAL
-                reverse_barriers = (Ets - Ep)*KCAL
-                predicted_barriers = (ts_predictions - r_predictions)*KCAL
-                predicted_reverse_barriers = (ts_predictions - p_predictions)*KCAL
-                rxn_e = (Ep - Er)*KCAL
-                predicted_rxn_e = (p_predictions - r_predictions)*KCAL
+                barriers = (Ets - Er)*KCAL_MOL_IN_HARTREE
+                reverse_barriers = (Ets - Ep)*KCAL_MOL_IN_HARTREE
+                predicted_barriers = (ts_predictions - r_predictions)*KCAL_MOL_IN_HARTREE
+                predicted_reverse_barriers = (ts_predictions - p_predictions)*KCAL_MOL_IN_HARTREE
+                rxn_e = (Ep - Er)*KCAL_MOL_IN_HARTREE
+                predicted_rxn_e = (p_predictions - r_predictions)*KCAL_MOL_IN_HARTREE
 
                 barrier_errors = barriers - predicted_barriers
                 barrier_rmse = np.sqrt(sum(barrier_errors[:]**2.0)/len(barrier_errors))
@@ -254,10 +252,10 @@ def main():
             big_errors = np.array(big_predictions) - np.array(y_big)
             rxn_rmse = np.sqrt(sum(rxn_errors[:]**2.0)/len(rxn_errors))
             big_rmse = np.sqrt(sum(big_errors[:]**2.0)/len(big_errors))
-            rxn_errors = rxn_errors*KCAL
-            big_errors = big_errors*KCAL
+            rxn_errors = rxn_errors*KCAL_MOL_IN_HARTREE
+            big_errors = big_errors*KCAL_MOL_IN_HARTREE
 
-            print("small rmse %.4f big rmse %.4f" % (rxn_rmse*KCAL, big_rmse*KCAL))
+            print("small rmse %.4f big rmse %.4f" % (rxn_rmse*KCAL_MOL_IN_HARTREE, big_rmse*KCAL_MOL_IN_HARTREE))
 
             smu, ssigma = histogram(
                 rxn_errors,

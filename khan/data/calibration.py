@@ -3,8 +3,8 @@ import time
 import numpy as np
 
 from khan.data import pyanitools as pya
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 
-HARTREE_TO_KCAL_PER_MOL = 627.509
 CALIBRATION_FILE = "/home/yutong/roitberg_data/ANI-1_release/results_QM_M06-2X.txt"
 
 params_list = [ -3.61495025e+02,  -2.38566440e+04,  -3.43234157e+04,
@@ -120,7 +120,7 @@ def load_calibration_file(calibration_file):
 def load_hdf5_files(
     hdf5files,
     calibration_map=None,
-    energy_cutoff=100.0/HARTREE_TO_KCAL_PER_MOL):
+    energy_cutoff=100.0/KCAL_MOL_IN_HARTREE):
 
     Xs = []
     ys = []
@@ -155,7 +155,7 @@ def load_hdf5_files(
                 if energy_cutoff is not None and E[k] - minimum > energy_cutoff:
                     continue
 
-                js18pairwiseOffset = jamesPairwiseCorrection(R[k], S)/HARTREE_TO_KCAL_PER_MOL
+                js18pairwiseOffset = jamesPairwiseCorrection(R[k], S)/KCAL_MOL_IN_HARTREE
 
                 y = E[k] - js18pairwiseOffset + calibration_offset
 

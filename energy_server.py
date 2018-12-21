@@ -13,9 +13,9 @@ import sys
 import numpy as np
 import json
 import client_server
+from khan.utils.constants import ANGSTROM_IN_BOHR
+from khan.lad import lad, lad_coulomb
 
-KCAL = 627.509
-BOHR = 0.52917721092 
 ENCODING = 'utf-8'
 
 MAX_BYTES = 1024**2
@@ -87,6 +87,11 @@ def parse_args(args):
         default=False,
         help="print some debugging info"
     )
+    parser.add_argument(
+        '--lad-data',
+        default=None,
+        help='Location of reference LAD data (json).  If given long range coulomb energy based on LAD charges will be added to predicted energies.'
+    )
     
     args = parser.parse_args()
 
@@ -102,6 +107,12 @@ def main():
     save_file = os.path.join(args.save_dir, "save_file.npz")
     if not os.path.exists(save_file):
         raise IOError("Saved NN numpy file does not exist")
+
+    # setup lad  
+    if args.lad_data:
+        lad_params = dict(lad.LAD_PARAMS)
+        reference_lads = lad.read_reference_lads(
+            args.lad_data, lad_params)
 
     config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Session(config=config) as sess:
@@ -153,13 +164,18 @@ def main():
                     # should I go back to total energy?
                     energy = float(trainer.predict(rd)[0])
                     self_interaction = sum(
-                        data_utils.selfIxnNrgWB97X_631gdp[example[0]] for example in X
+                        data_utils.selfIxnNrgWB97X[example[0]] for example in X
                     )
                     energy += self_interaction
 
                     gradient = list(trainer.coordinate_gradients(rd))[0]
                     natoms, ndim = gradient.shape
                     gradient = gradient.reshape(natoms*ndim)
+
+                    # add in coulomb
+                    if args.lad_data:
+                        q = lad_coulomb.lad_charges(X_np, lad_params, reference_lads)
+                        energy += lad_coulomb.coulomb(X_np, q) 
 
                     if args.fdiff_grad:
                         fd_gradient = fdiff_grad(X_np, trainer)
@@ -175,7 +191,7 @@ def main():
 
                     # convert gradient from hartree/angstrom to hartree/bohr
                     # and to jsonable format
-                    gradient = [float(g)*BOHR for g in gradient]
+                    gradient = [float(g)*ANGSTROM_IN_BOHR for g in gradient]
 
                     print("sending gradient")
                     print(gradient)

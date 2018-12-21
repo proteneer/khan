@@ -6,7 +6,7 @@ import sklearn.model_selection
 
 from khan.data.dataset import RawDataset
 from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
-from data_utils import HARTREE_TO_KCAL_PER_MOL
+from khan.utils.constants import KCAL_MOL_IN_HARTREE
 from data_loaders import DataLoader
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,7 +41,7 @@ def run_one_epoch(args):
 
     global_epoch = train_results[0][0]
     time_per_epoch = time.time() - start_time
-    train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+    train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * KCAL_MOL_IN_HARTREE
     learning_rate = train_results[0][1]
     local_epoch_count = train_results[0][2]
 
@@ -193,7 +193,7 @@ def main():
 
     #             global_epoch = train_results[0][0]
     #             time_per_epoch = time.time() - start_time
-    #             train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * HARTREE_TO_KCAL_PER_MOL
+    #             train_abs_rmse = np.sqrt(np.mean(flatten_results(train_results, pos=3))) * KCAL_MOL_IN_HARTREE
     #             learning_rate = train_results[0][1]
     #             local_epoch_count = train_results[0][2]
 
