@@ -216,7 +216,8 @@ def load_hdf5_files(
     hdf5files,
     calibration_map=None,
     energy_cutoff=ENERGY_CUTOFF,
-    use_fitted=False):
+    use_fitted=False,
+    max_atom_limit=MAX_ATOM_LIMIT):
     """
     Load the ANI dataset.
 
@@ -256,14 +257,14 @@ def load_hdf5_files(
             R = data['coordinates']
             E = data['energies']
             S = data['species']
-            smi = data['smiles']
+            # LDJ not used smi = data['smiles']
 
             path = P.split("/")[-1]
 
             Z = convert_species_to_atomic_nums(S)
 
-            if len(Z) > MAX_ATOM_LIMIT:
-                print("skippng", P, 'n_atoms too large:', len(Z), '>', MAX_ATOM_LIMIT)
+            if len(Z) > max_atom_limit:
+                print("skippng", P, 'n_atoms too large:', len(Z), '>', max_atom_limit)
                 continue
 
             minimum_wb97 = np.amin(E)

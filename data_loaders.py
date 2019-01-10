@@ -221,11 +221,33 @@ class DataLoader():
         calibration_map=cal_map,
         use_fitted=self.use_fitted)
 
-        
-
         return X_gdb11, y_gdb11
 
     def load_ff(self, data_dir):
         ff_test_Xs, ff_test_ys, ff_groups = data_utils.load_ff_files(data_dir, use_fitted=self.use_fitted)
 
         return ff_test_Xs, ff_test_ys, ff_groups
+
+    def load_comp6(self, data_dir, max_atom_limit=data_utils.MAX_ATOM_LIMIT):
+        """
+        Load the COMP6 dataset
+        Inputs
+        --------
+        data_dir: path name to directory
+        Returns
+        --------
+        dictionary with filename: (Xs, ys) correspondence
+        """
+
+        comp6 = {}
+        for root, dirs, files in os.walk(data_dir):
+            for fname in files:
+                if fname.endswith(".h5"):
+                    file_path = os.path.join(root, fname)
+                    data_name = fname[:-3]
+                    Xs, ys = data_utils.load_hdf5_files(
+                        [file_path], max_atom_limit=max_atom_limit)
+                    comp6[data_name] = (Xs, ys)
+
+        return comp6
+
