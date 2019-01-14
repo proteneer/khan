@@ -125,10 +125,9 @@ class Committee(object):
                 print("initializing network %d" % m)
                 trainer.initialize()
 
-                # don't do it in variable scope?
-                if os.path.exists(save_file):
-                    print("loading network from saved file %s" % save_file)
-                    trainer.load_numpy(save_file, strict=False)
+            if os.path.exists(save_file):
+                print("loading network from saved file %s" % save_file)
+                trainer.load_numpy(save_file, strict=False)
 
             trainers.append((scope_name, save_file, trainer))
 
@@ -168,6 +167,7 @@ class Committee(object):
             imember = np.random.random_integers(0, self._nmembers)
             self._training_data[imember].all_Xs.append(pairs[idata][0])
             self._training_data[imember].all_ys.append(pairs[idata][1])
+           
 
     def train(self, batch_size=256):
         """
@@ -421,8 +421,7 @@ class Committee(object):
             (i, "save_numpy", save_file) for i, (_, save_file, _) in enumerate(self._members)
         ]
         
-        self._thread_pool.starmap(self._run_member_method, save_args)
-        #for args in save_args:
-        #    print("running save", args)
-        #    self._run_member_method(*args)
+        #self._thread_pool.starmap(self._run_member_method, save_args)
+        for args in save_args:
+            self._run_member_method(*args)
 
