@@ -784,7 +784,7 @@ class Trainer():
             batch_size=batch_size
         )
 
-        return results
+        return flatten_results(results)
 
     def save_ewc_params(self, dataset, ewc_npz_file, batch_size=2048):
         """

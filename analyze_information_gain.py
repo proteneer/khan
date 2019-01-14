@@ -1,27 +1,17 @@
-import functools
 import os
 import numpy as np
-import time
 import tensorflow as tf
-import sklearn.model_selection
-import scipy.optimize
 import json
-from collections import namedtuple
+import argparse
 
 from khan.model import activations
 from khan.data.dataset import RawDataset
-from khan.training.trainer_multi_tower import TrainerMultiTower, flatten_results, initialize_module
-import data_utils
-from concurrent.futures import ThreadPoolExecutor
+from khan.training.trainer_multi_tower import initialize_module
+from khan.training.committee import Committee
 from khan.utils.constants import KCAL_MOL_IN_HARTREE
 
 from khan.lad import lad
 from khan.lad import lad_coulomb
-
-from multiprocessing.dummy import Pool as ThreadPool 
-
-import multiprocessing
-import argparse
 
 VARIANCE = 'committee variance'
 RANDOM = 'random selection'
@@ -30,10 +20,7 @@ VARIANCE_WEIGHTED_BOLTZMANN = 'variance weighted boltzmann'
 SELECTION_METHODS = [VARIANCE, RANDOM, BOLTZMANN, VARIANCE_WEIGHTED_BOLTZMANN]
 
 kT = 0.001 # in Hartree
-#NN_LAYERS = tuple([256]*4 + [1])
 NN_LAYERS = (256, 256, 64, 1)
-
-CommitteeData = namedtuple("CommitteeData", ["energy", "variance", "energy_grad", "variance_grad", "predictions"])
 
 def parse_args():
     """
@@ -51,12 +38,6 @@ def parse_args():
         default=None,
         type=str,
         help="Input json file holding geometries to optimize"
-    )
-
-    parser.add_argument(
-        '--optimize-inputs',
-        default=False,
-        help="Optimize input molecules on each model before maximizing info gain"
     )
 
     parser.add_argument(
@@ -79,9 +60,9 @@ def parse_args():
     )
 
     parser.add_argument('--saved-network',
-        default=[], 
-        nargs='+',
-        help="location of saved networks to build committee")
+        default=None,
+        type=str,
+        help="scratch directory holding saved networks to build committee")
 
     parser.add_argument(
         '--deep-network',
@@ -125,43 +106,6 @@ def parse_args():
 
 
     return parser.parse_args()
-
-def read_networks(tf_sess, saved_networks, activation_fn, n_gpus, layers):
-    """
-    read in saved networks
-
-    Input:
-        tf_sess: TensorFlow session
-        saved_networks: list of directories holding saved network parameters
-        activation_fn: activation function
-        n_gpus: number of gpus to run on
-        layers: tuple specifying architechture of networks
-    Output:
-        list of tuples of TrainerMultiTower instances, scope name
-    """
-
-    if n_gpus > 0:
-        towers = ["/gpu:"+str(i) for i in range(n_gpus)]
-    else:
-        towers = ["/cpu:"+str(i) for i in range(multiprocessing.cpu_count())]
-        towers = ["/cpu:0"]
-
-    trainers = []
-    save_files = [os.path.join(save_dir, "save_file.npz") for save_dir in saved_networks]
-    for m, save_file in enumerate(save_files):
-        scope_name = "model_" + str(m)
-        with tf.variable_scope(scope_name):
-            trainer = TrainerMultiTower(
-	        tf_sess,
-	        towers=towers,
-	        layer_sizes=layers,
-	        activation_fn=activation_fn,
-	        precision=tf.float64
-	    )
-            trainer.load_numpy(save_file, strict=False)
-            trainers.append((scope_name, trainer))
-
-    return trainers
 
 def read_molecules(fname, energy_cutoff=100.0/KCAL_MOL_IN_HARTREE):
     """
@@ -218,109 +162,6 @@ def write_molecules(fname, X, y):
     with open(fname, "w") as fout:
         fout.write(json.dumps(data))
         
-        
-
-def model_E_and_grad(rd, scope_name, model):
-    """
-    compute energy and gradient over a dataset
-        Parameters
-        ---------- 
-            X: definittion of molecule in khan format
-            model: TrainerMultiTower instance
-        Returns
-        ---------
-            list of energies and list of gradients
-    """
-    with tf.variable_scope(scope_name):
-        energies = list(model.predict(rd))
-        gradient = list(model.coordinate_gradients(rd))
-
-    # add self energy correction
-    for i, mol in enumerate(rd.all_Xs):
-        atom_energies = [data_utils.selfIxnNrgWB97X[int(at[0])] for at in mol]
-        energies[i] += sum(atom_energies) 
-
-    return energies, gradient 
-
-class Committee(object):
-    def __init__(self, tf_sess, saved_networks, activation_fn, n_gpus, layers):
-        """
-        Start committee 
-
-        Parameters
-        ---------
-            tf_sess: TensorFlow session
-            saved_networks: list of directories holding saved network parameters
-            activation_fn: activation function
-            n_gpus: number of gpus to run on
-            layers: tuple specifying architechture of networks
-        """
-        self._members = read_networks(tf_sess, saved_networks, activation_fn, n_gpus, layers)
-        self._nmembers = len(self._members)
-
-    def compute_data(self, rd):
-        """
-        Computes data over a dataset
-
-        Parameters
-        -----------
-            rd: RawDataset
-        Returns:
-        ----------
-            a list of ComitteeData instances
-        """
-        n_data = rd.num_mols()
-
-        # evaluate energy/gradient data for all members for all data
-        energies = [] 
-        gradients = [] 
-        for imember, (scope_name, member) in enumerate(self._members):
-            e, g = model_E_and_grad(rd, scope_name, member)
-            energies.append(e)
-            gradients.append(g)
-
-        # accumulate ave and variance of energies across members of committee
-        # do this for every data point
-        comittee_data = []
-        for idata in range(n_data):
-
-            energy_ave = 0.0
-            energy_grad = 0.0
-            for imember in range(self._nmembers):
-                energy_ave += energies[imember][idata]
-                energy_grad += gradients[imember][idata]
-            energy_ave /= self._nmembers
-            energy_grad /= self._nmembers
-
-            variance = 0.0
-            variance_grad = 0.0
-            for imember in range(self._nmembers):
-                variance += (energies[imember][idata] - energy_ave)**2.0
-                variance_grad += 2.0 * (energies[imember][idata] - energy_ave) \
-                                     * (gradients[imember][idata] - energy_grad)
-            variance /= self._nmembers
-            variance_grad /= self._nmembers
-
-            dumb = [energies[imember][idata] for imember in range(self._nmembers)]
-            data = CommitteeData(energy_ave, variance, energy_grad, variance_grad, dumb)
-            comittee_data.append(data)
-
-        return comittee_data
-
-    def energy_and_variance(self, rd):
-        """
-        return predicted energy and variance for a dataset
-
-        Parameters
-        -----------
-            rd: RawDataset
-        Returns:
-        ----------
-            a list of energy, variance pairs
-        """
-        
-        return [(instance.energy, instance.variance) for instance in self.compute_data(rd)]
-
 def main():
 
     args = parse_args()
@@ -360,8 +201,16 @@ def main():
 
         sess.run(tf.global_variables_initializer())
         print("build committee")
-        committee = Committee(sess, args.saved_network, activation_fn, args.gpus, layers)
-
+        committee = Committee(
+            args.saved_network,
+            None, # nmembers (read them)
+            sess,
+            tf.float64,
+            True, # add atomization
+            None, # EWC
+            activation_fn=activation_fn,
+            layer_sizes=layers
+        )
 
         committee_data = committee.compute_data(rd)
         print("predicting energy and variance of datapoints ...")
@@ -401,16 +250,6 @@ def main():
         
         print("done")
 
-
 if __name__ == "__main__":
     main()
-
-'''
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/gridengine/lib/lx-amd64:/opt/openmpi/lib:/nfs/utils/stow/Python-3.5.3/lib/:/nfs/utils/stow/cuda-9.0/lib64/:/home/yzhao/libs/cuda/lib64
-source /home/yzhao/venv/bin/activate
-python -u ../gdb8_information_gain.py --work-dir info_gain_0 --ani_lib ../gpu_featurizer/ani.so
-'''
-
-
-
 
